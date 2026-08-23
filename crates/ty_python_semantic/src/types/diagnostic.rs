@@ -164,6 +164,9 @@ pub(crate) fn register_lints(registry: &mut LintRegistryBuilder) {
     registry.register_lint(&INVALID_ATTRIBUTE_ACCESS);
     registry.register_lint(&REDUNDANT_CAST);
     registry.register_lint(&REDUNDANT_FINAL_CLASSVAR);
+    registry.register_lint(&crate::types::unnecessary::UNNECESSARY_ISINSTANCE);
+    registry.register_lint(&crate::types::unnecessary::UNNECESSARY_COMPARISON);
+    registry.register_lint(&crate::types::unnecessary::UNNECESSARY_CONTAINS);
     registry.register_lint(&UNRESOLVED_GLOBAL);
     registry.register_lint(&MISSING_TYPED_DICT_KEY);
     registry.register_lint(&INVALID_TYPED_DICT_STATEMENT);

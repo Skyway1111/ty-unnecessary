@@ -337,6 +337,11 @@ fn mdtest_rule_selection(rules: Option<&Rules>, required_rule: Option<&str>) -> 
         "unsound-assignment",
         "unsound-return-statement",
         "unsound-yield",
+        // The pyright-ported `unnecessary-*` rules are opt-in: they fire on the
+        // isinstance/comparison patterns that narrowing tests are made of.
+        "unnecessary-isinstance",
+        "unnecessary-comparison",
+        "unnecessary-contains",
     ];
 
     let registry = default_lint_registry();

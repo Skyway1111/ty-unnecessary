@@ -170,6 +170,7 @@ mod type_expansion;
 mod type_form;
 mod typed_dict;
 mod typevar;
+pub(crate) mod unnecessary;
 mod unpacker;
 mod variance;
 mod visitor;
@@ -209,6 +210,14 @@ pub fn check_types(db: &dyn Db, file: ProgramFile<'_>) -> Vec<Diagnostic> {
             .iter()
             .map(|error| Diagnostic::invalid_syntax(source_file, error, error)),
     );
+
+    // Post-inference checker pass for the pyright-ported `unnecessary-*` lints.
+    {
+        let module = parsed_module(db, file.python_file(db)).load(db);
+        diagnostics.extend(&unnecessary::check_unnecessary_diagnostics(
+            db, file, &module,
+        ));
+    }
 
     let diagnostics = check_suppressions(db, file.python_file(db), diagnostics);
 

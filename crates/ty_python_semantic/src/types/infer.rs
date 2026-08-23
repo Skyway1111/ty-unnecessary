@@ -1776,7 +1776,10 @@ impl<'db> ExpressionInference<'db> {
         self
     }
 
-    fn try_expression_type(&self, expression: impl Into<ExpressionNodeKey>) -> Option<Type<'db>> {
+    pub(crate) fn try_expression_type(
+        &self,
+        expression: impl Into<ExpressionNodeKey>,
+    ) -> Option<Type<'db>> {
         self.expressions
             .get(&expression.into())
             .copied()

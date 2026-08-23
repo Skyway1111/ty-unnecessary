@@ -467,7 +467,7 @@ impl ClassInfoConstraintFunction {
     ///
     /// The `classinfo` argument can be a class literal, a tuple of (tuples of) class literals. PEP 604
     /// union types are not yet supported. Returns `None` if the `classinfo` argument has a wrong type.
-    fn generate_constraint<'db>(
+    pub(crate) fn generate_constraint<'db>(
         self,
         db: &'db dyn Db,
         env: &ProgramEnvironment<'db>,
@@ -787,7 +787,7 @@ impl<'db> Conjunctions<'db> {
 /// For example, filtering `Sequence[int]` with `list[Unknown]` first infers `list[int]` from
 /// the target class's specialized `Sequence` base. Unrelated union arms and intersection elements
 /// are still intersected with the original unknown-specialized target.
-fn filter_generic_narrowing_constraint<'db>(
+pub(crate) fn filter_generic_narrowing_constraint<'db>(
     db: &'db dyn Db,
     env: &ProgramEnvironment<'db>,
     subject: Type<'db>,
