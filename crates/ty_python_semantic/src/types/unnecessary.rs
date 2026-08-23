@@ -1,6 +1,9 @@
 //! Ports of pyright's `reportUnnecessaryIsInstance`, `reportUnnecessaryComparison` and
 //! `reportUnnecessaryContains` checks onto ty's type API.
 //!
+//! pyright is © Microsoft Corporation, MIT-licensed; this module mirrors its published
+//! algorithms onto ty's type API.
+//!
 //! Semantics source of truth: pyright `packages/pyright-internal/src/analyzer/checker.ts`
 //! (`_validateIsInstanceCall`, `_validateComparisonTypes`, `_validateContainmentTypes`,
 //! `_reportUnnecessaryConditionExpression`) and `typeEvaluator.ts` (`typesOverlap`,

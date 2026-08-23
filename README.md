@@ -1,3 +1,6 @@
+> **Fork notice**: this is `ty-unnecessary`, a fork of ruff at tag 0.16.4 adding pyright's
+> `reportUnnecessary*` family to ty. See [README.ty-unnecessary.md](README.ty-unnecessary.md).
+
 <!-- Begin section: Overview -->
 
 # Ruff
