@@ -62,6 +62,26 @@ def _(x: A):
     isinstance(x, B)
 ```
 
+## `float` promotion
+
+pyright expands promotion types on the first argument (`float` behaves as `int | float`), so
+neither direction of a float/int check is reported; `bool` really is always an `int`.
+Verified bit-identical with basedpyright 1.39.10.
+
+```toml
+[rules]
+unnecessary-isinstance = "error"
+```
+
+```py
+def _(x: float):
+    isinstance(x, float)
+    isinstance(x, int)
+
+def _(x: bool):
+    isinstance(x, int)  # error: [unnecessary-isinstance]
+```
+
 ## `issubclass`
 
 ```toml
