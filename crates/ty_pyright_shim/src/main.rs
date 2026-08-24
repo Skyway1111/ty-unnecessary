@@ -16,8 +16,8 @@ use anyhow::{Context, Result};
 use ruff_db::diagnostic::{Diagnostic, DiagnosticId, Severity, UnifiedFile};
 use ruff_db::source::{line_index, source_text};
 use ruff_db::system::{OsSystem, SystemPath, SystemPathBuf};
-use ty_project::metadata::options::{EnvironmentOptions, Options, SrcOptions};
 use ruff_ranged_value::RangedValue;
+use ty_project::metadata::options::{EnvironmentOptions, Options, SrcOptions};
 use ty_project::metadata::value::{RelativeGlobPattern, RelativePathBuf};
 use ty_project::{ProjectDatabase, ProjectMetadata};
 use ty_python_semantic::lint::Level;
@@ -199,7 +199,11 @@ fn main() -> Result<()> {
                 None
             } else {
                 Some(RangedValue::cli(
-                    config.exclude.iter().map(RelativeGlobPattern::cli).collect(),
+                    config
+                        .exclude
+                        .iter()
+                        .map(RelativeGlobPattern::cli)
+                        .collect(),
                 ))
             },
             ..SrcOptions::default()
@@ -286,8 +290,7 @@ pub(crate) fn convert(db: &ProjectDatabase, diagnostic: &Diagnostic) -> Option<s
         // pyright: `Type of "<expr>" is "<type>"`. The oracle's regex wildcards the
         // expression, so a placeholder is fine; the type comes from ty's annotation
         // message (a backtick-quoted type), normalized to pyright's display forms.
-        let type_text =
-            normalize_type_display(annotation.get_message()?.trim_matches('`'));
+        let type_text = normalize_type_display(annotation.get_message()?.trim_matches('`'));
         let expr_text = source
             .as_str()
             .get(std::ops::Range::<usize>::from(range))
@@ -362,13 +365,10 @@ pub(crate) fn normalize_type_display(text: &str) -> String {
             if ch == '*' && i > 0 && bytes[i - 1].is_ascii_alphanumeric() {
                 continue;
             }
-            if span[i..].starts_with("def ") && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
-            {
+            if span[i..].starts_with("def ") && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric()) {
                 if let Some(paren) = span[i..].find('(') {
                     let name = &span[i + 4..i + paren];
-                    if !name.is_empty()
-                        && name.chars().all(|c| c.is_alphanumeric() || c == '_')
-                    {
+                    if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
                         skip_until = i + paren;
                         continue;
                     }
@@ -430,13 +430,22 @@ mod tests {
     #[test]
     fn star_markers_stripped_outside_literals() {
         assert_eq!(normalize_type_display("float*"), "float");
-        assert_eq!(normalize_type_display("int | float* | complex*"), "int | complex".replace("int | complex", "int | float | complex"));
+        assert_eq!(
+            normalize_type_display("int | float* | complex*"),
+            "int | complex".replace("int | complex", "int | float | complex")
+        );
     }
 
     #[test]
     fn literal_contents_untouched() {
-        assert_eq!(normalize_type_display("Literal[\"a*b\"]"), "Literal[\"a*b\"]");
-        assert_eq!(normalize_type_display("Literal['def f(']"), "Literal['def f(']");
+        assert_eq!(
+            normalize_type_display("Literal[\"a*b\"]"),
+            "Literal[\"a*b\"]"
+        );
+        assert_eq!(
+            normalize_type_display("Literal['def f(']"),
+            "Literal['def f(']"
+        );
         assert_eq!(
             normalize_type_display("Literal[\"x\"] | float*"),
             "Literal[\"x\"] | float"
@@ -445,7 +454,10 @@ mod tests {
 
     #[test]
     fn module_display_rewritten() {
-        assert_eq!(normalize_type_display("<module 'torch'>"), "Module(\"torch\")");
+        assert_eq!(
+            normalize_type_display("<module 'torch'>"),
+            "Module(\"torch\")"
+        );
         // the rewritten module name is quote-protected from later passes
         assert_eq!(normalize_type_display("<module 'a*b'>"), "Module(\"a*b\")");
     }
@@ -458,6 +470,9 @@ mod tests {
             "(x, y) -> None"
         );
         // not a definition display: untouched
-        assert_eq!(normalize_type_display("undef (x) -> int"), "undef (x) -> int");
+        assert_eq!(
+            normalize_type_display("undef (x) -> int"),
+            "undef (x) -> int"
+        );
     }
 }

@@ -27,6 +27,7 @@ use ruff_text_size::{Ranged, TextRange};
 use ty_module_resolver::file_to_module;
 use ty_python_core::{ProgramFile, semantic_index};
 
+use crate::Db;
 use crate::declare_lint;
 use crate::lint::{Level, LintStatus};
 use crate::types::context::InferContext;
@@ -37,7 +38,6 @@ use crate::types::{
     ClassLiteral, ClassType, KnownClass, LiteralValueTypeKind, MemberLookupPolicy,
     ProgramEnvironment, Type, TypeCheckDiagnostics, TypeVarBoundOrConstraints, UnionType,
 };
-use crate::Db;
 
 declare_lint! {
     #[doc = include_str!("../../resources/lint_docs/unnecessary-isinstance.md")]
@@ -300,8 +300,7 @@ impl<'db> UnnecessaryChecker<'db, '_> {
         for (index, op) in compare.ops.iter().enumerate() {
             let left = operands[index];
             let right = operands[index + 1];
-            let range =
-                TextRange::new(operand_range(left).start(), operand_range(right).end());
+            let range = TextRange::new(operand_range(left).start(), operand_range(right).end());
             match op {
                 ast::CmpOp::Eq | ast::CmpOp::NotEq | ast::CmpOp::Is | ast::CmpOp::IsNot => {
                     self.check_comparison_pair(left, *op, right, range);
@@ -763,16 +762,16 @@ fn is_type_comparable_impl<'db>(
     if let Type::Intersection(intersection) = left {
         let concrete = project_intersection(db, intersection);
         return concrete.is_empty()
-            || concrete.iter().any(|p| {
-                is_type_comparable_impl(db, env, *p, right, assume_is_operator, true)
-            });
+            || concrete
+                .iter()
+                .any(|p| is_type_comparable_impl(db, env, *p, right, assume_is_operator, true));
     }
     if let Type::Intersection(intersection) = right {
         let concrete = project_intersection(db, intersection);
         return concrete.is_empty()
-            || concrete.iter().any(|p| {
-                is_type_comparable_impl(db, env, left, *p, assume_is_operator, true)
-            });
+            || concrete
+                .iter()
+                .any(|p| is_type_comparable_impl(db, env, left, *p, assume_is_operator, true));
     }
 
     if left.is_dynamic() || right.is_dynamic() {
@@ -877,8 +876,8 @@ fn is_type_comparable_impl<'db>(
             // (strict `float == Literal[0]` is reported, `float == int` is not; a
             // declared `float` parameter is ty's `int | float*` union, whose `int`
             // member covers the literal comparisons without any promotion).
-            let literal_involved = matches!(left, Type::LiteralValue(..))
-                || matches!(right, Type::LiteralValue(..));
+            let literal_involved =
+                matches!(left, Type::LiteralValue(..)) || matches!(right, Type::LiteralValue(..));
             if let Some(right_instance) = right_instance
                 && !(strict_numeric && literal_involved)
             {

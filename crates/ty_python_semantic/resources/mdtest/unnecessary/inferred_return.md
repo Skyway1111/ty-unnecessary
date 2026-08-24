@@ -174,3 +174,59 @@ def outer(n: int):
 
 reveal_type(outer)  # revealed: (n: int) -> Generator[int, Any, None]
 ```
+
+## `return f(...)` through another unannotated function reveals `f`'s inferred return
+
+ty leaves the result of an unannotated call `Unknown`; pyright propagates the callee's
+inferred return. The chain arm covers direct `return <call>` sites (plain functions and
+bound methods), recursing through the chain with a cycle guard. Calls nested in other
+expressions, and callees whose own inference is `Unknown`, stay as inferred.
+
+```py
+def helper(x: int):
+    return x + 1
+
+def chain(x: int):
+    return helper(x)
+
+def two_level(x: int):
+    return chain(x)
+
+def mixed(flag: bool):
+    if flag:
+        return None
+    return helper(1)
+
+class C:
+    def m(self, x: int):
+        return x * 2
+
+    def via_self(self, x: int):
+        return self.m(x)
+
+def via_receiver(c: C, x: int):
+    return c.m(x)
+
+def recursive(n: int):
+    if n:
+        return recursive(n - 1)
+    return 0
+
+def nested(x: int):
+    return [helper(x)]
+
+def untyped_callee(x):
+    return x
+
+def through_untyped(x: int):
+    return untyped_callee(x)
+
+reveal_type(chain)  # revealed: (x: int) -> int
+reveal_type(two_level)  # revealed: (x: int) -> int
+reveal_type(mixed)  # revealed: (flag: bool) -> None | int
+reveal_type(C.via_self)  # revealed: (self, x: int) -> int
+reveal_type(via_receiver)  # revealed: (c: C, x: int) -> int
+reveal_type(recursive)  # revealed: (n: int) -> Unknown | Literal[0]
+reveal_type(nested)  # revealed: (x: int) -> list[Unknown]
+reveal_type(through_untyped)  # revealed: (x: int) -> Unknown
+```

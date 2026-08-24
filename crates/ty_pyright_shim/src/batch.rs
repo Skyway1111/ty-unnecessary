@@ -12,14 +12,24 @@
 //!   ],
 //!   "worlds": [
 //!     {"id": "p0", "overlays": [{"file": "src/m.py", "content": "..."}]}
-//!   ]
+//!   ],
+//!   "call_edges": true
 //! }
 //! ```
 //!
 //! Response: `{"version", "diagnostics": [...], "answers": {id: type},
-//! "worlds": [{"id", "added_diagnostics": [...]}]}` — diagnostic entries in the
-//! same shape as the pyright-CLI mode's `generalDiagnostics` (error-severity
-//! passthrough included: sightline's counterfactual veto depends on it).
+//! "worlds": [{"id", "added_diagnostics": [...]}], "call_edges": [...]}` —
+//! diagnostic entries in the same shape as the pyright-CLI mode's
+//! `generalDiagnostics` (error-severity passthrough included: sightline's
+//! counterfactual veto depends on it).
+//!
+//! `call_edges` (when requested): one entry per call expression in a project
+//! `.py` file whose callee type denotes definitions inside the analyzed root —
+//! `{"file", "line", "col", "end_line", "end_col", "targets": [{"file",
+//! "line"}]}`, 1-based lines, byte columns (Python's `ast` convention), target
+//! lines at the definition's name; sorted. Definitions only (functions, bound
+//! methods' functions, classes for constructor calls; unions all-or-nothing) —
+//! which override a call reaches at runtime is sightline's judgement.
 //!
 //! Span queries resolve natively (covering node at the exact range, real
 //! inference — no source mutation). Expr queries append `reveal_type(<expr>)`
@@ -41,14 +51,16 @@ use ruff_db::parsed::parsed_module;
 use ruff_db::source::{line_index, source_text};
 use ruff_db::system::{SystemPath, SystemPathBuf};
 use ruff_diagnostics::SourceMap;
-use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::find_node::covering_node;
+use ruff_python_ast::visitor::source_order::{self, SourceOrderVisitor};
+use ruff_python_ast::{self as ast, AnyNodeRef};
+use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use salsa::Setter as _;
 use serde::Deserialize;
-use ty_project::ProjectDatabase;
+use ty_project::{Db as _, ProjectDatabase};
 use ty_python_semantic::Db as _;
-use ty_python_semantic::types::revealed_display;
+use ty_python_semantic::types::{callee_definitions, revealed_display};
 use ty_python_semantic::{HasType, SemanticModel};
 
 use crate::convert;
@@ -59,6 +71,8 @@ struct Request {
     queries: Vec<Query>,
     #[serde(default)]
     worlds: Vec<World>,
+    #[serde(default)]
+    call_edges: bool,
 }
 
 #[derive(Deserialize)]
@@ -93,11 +107,7 @@ fn resolve(db: &ProjectDatabase, root: &SystemPath, rel: &str) -> Result<File> {
         .map_err(|_| anyhow!("request names a file the project cannot resolve: `{rel}`"))
 }
 
-pub(crate) fn run(
-    db: &mut ProjectDatabase,
-    root: &SystemPath,
-    request_path: &str,
-) -> Result<()> {
+pub(crate) fn run(db: &mut ProjectDatabase, root: &SystemPath, request_path: &str) -> Result<()> {
     let text = std::fs::read_to_string(request_path)
         .with_context(|| format!("failed to read batch request `{request_path}`"))?;
     let request: Request =
@@ -155,8 +165,7 @@ pub(crate) fn run(
         if q.expr.is_some() {
             continue;
         }
-        let (Some(line), Some(col_start), Some(col_end)) = (q.line, q.col_start, q.col_end)
-        else {
+        let (Some(line), Some(col_start), Some(col_end)) = (q.line, q.col_start, q.col_end) else {
             return Err(anyhow!(
                 "query `{}` has neither expr nor a complete line/col span",
                 q.id
@@ -167,6 +176,13 @@ pub(crate) fn run(
             answers.insert(q.id.clone(), type_text);
         }
     }
+
+    // -- callee edges: every call's definition targets, from the same base state
+    let edges = if request.call_edges {
+        call_edges(db, root)
+    } else {
+        Vec::new()
+    };
 
     // -- worlds: sequential incremental re-checks, added-diagnostics vs base
     let mut world_results = Vec::new();
@@ -205,6 +221,7 @@ pub(crate) fn run(
         "diagnostics": diagnostics,
         "answers": answers,
         "worlds": world_results,
+        "call_edges": edges,
     });
     let mut stdout = std::io::stdout().lock();
     serde_json::to_writer(&mut stdout, &output)?;
@@ -214,10 +231,7 @@ pub(crate) fn run(
 
 /// `(file, one-based line, normalized type text)` when `diagnostic` is a
 /// `RevealedType` artifact.
-fn reveal_answer(
-    db: &ProjectDatabase,
-    diagnostic: &Diagnostic,
-) -> Option<(File, usize, String)> {
+fn reveal_answer(db: &ProjectDatabase, diagnostic: &Diagnostic) -> Option<(File, usize, String)> {
     if diagnostic.id() != DiagnosticId::RevealedType {
         return None;
     }
@@ -230,8 +244,7 @@ fn reveal_answer(
     let source = source_text(db, *file);
     let index = line_index(db, *file);
     let line = index.line_column(range.start(), &source).line.get();
-    let type_text =
-        crate::normalize_type_display(annotation.get_message()?.trim_matches('`'));
+    let type_text = crate::normalize_type_display(annotation.get_message()?.trim_matches('`'));
     Some((*file, line, type_text))
 }
 
@@ -250,10 +263,7 @@ fn span_type(
     let parsed = parsed_module(db, program_file.python_file(db)).load(db);
     let source = source_text(db, file);
     let index = line_index(db, file);
-    let line_start = index.line_start(
-        ruff_source_file::OneIndexed::new(line)?,
-        &source,
-    );
+    let line_start = index.line_start(ruff_source_file::OneIndexed::new(line)?, &source);
     let start = line_start + TextSize::try_from(col_start).ok()?;
     let end = line_start + TextSize::try_from(col_end).ok()?;
     if end > TextSize::of(source.as_str()) || start > end {
@@ -274,6 +284,96 @@ fn span_type(
     let ty = expr_ref.inferred_type(&model)?;
     let display = revealed_display(db, ty, &model.program_environment());
     Some(crate::normalize_type_display(&display))
+}
+
+/// Every call expression in a project `.py` file with ≥1 definition target
+/// inside `root` (module doc), sorted by position.
+fn call_edges(db: &ProjectDatabase, root: &SystemPath) -> Vec<serde_json::Value> {
+    // (file, line, col, end_line, end_col): the sort key and sightline's site identity
+    type Span = (String, usize, usize, usize, usize);
+    let mut edges: Vec<(Span, serde_json::Value)> = Vec::new();
+    for file in &db.project().files(db) {
+        let Some(path) = file.path(db).as_system_path() else {
+            continue;
+        };
+        if path.extension() != Some("py") || !path.starts_with(root) {
+            continue;
+        }
+        let program_file = db.program_file(file);
+        let parsed = parsed_module(db, program_file.python_file(db)).load(db);
+        let model = SemanticModel::new(db, program_file);
+        let source = source_text(db, file);
+        let index = line_index(db, file);
+        let mut calls = CallCollector::default();
+        for stmt in &parsed.syntax().body {
+            calls.visit_stmt(stmt);
+        }
+        for call in calls.calls {
+            let Some(callee) = ast::ExprRef::from(&*call.func).inferred_type(&model) else {
+                continue;
+            };
+            let Some(definitions) = callee_definitions(db, callee) else {
+                continue;
+            };
+            let mut targets: Vec<(String, usize)> = Vec::new();
+            for definition in definitions {
+                let target = definition.file();
+                let Some(target_path) = target.path(db).as_system_path() else {
+                    targets.clear();
+                    break;
+                };
+                if !target_path.starts_with(root) {
+                    targets.clear(); // a union reaching outside the root: no edge
+                    break;
+                }
+                let line = line_index(db, target).line_index(definition.range().start());
+                targets.push((target_path.to_string(), line.get()));
+            }
+            if targets.is_empty() {
+                continue;
+            }
+            targets.sort();
+            targets.dedup();
+            let (line, col) = byte_position(&index, &source, call.range().start());
+            let (end_line, end_col) = byte_position(&index, &source, call.range().end());
+            let entry = serde_json::json!({
+                "file": path.to_string(),
+                "line": line,
+                "col": col,
+                "end_line": end_line,
+                "end_col": end_col,
+                "targets": targets
+                    .iter()
+                    .map(|(file, line)| serde_json::json!({"file": file, "line": line}))
+                    .collect::<Vec<_>>(),
+            });
+            edges.push(((path.to_string(), line, col, end_line, end_col), entry));
+        }
+    }
+    edges.sort_by(|a, b| a.0.cmp(&b.0));
+    edges.into_iter().map(|(_, entry)| entry).collect()
+}
+
+/// `(1-based line, byte column within the line)` of an offset.
+fn byte_position(index: &LineIndex, source: &str, offset: TextSize) -> (usize, usize) {
+    let line = index.line_index(offset);
+    let col = (offset - index.line_start(line, source)).to_usize();
+    (line.get(), col)
+}
+
+/// Every call expression in a module, nested scopes included, in source order.
+#[derive(Default)]
+struct CallCollector<'a> {
+    calls: Vec<&'a ast::ExprCall>,
+}
+
+impl<'a> SourceOrderVisitor<'a> for CallCollector<'a> {
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if let ast::Expr::Call(call) = expr {
+            self.calls.push(call);
+        }
+        source_order::walk_expr(self, expr);
+    }
 }
 
 /// The added-diff identity `(file, zero-based line, rule)` of a converted

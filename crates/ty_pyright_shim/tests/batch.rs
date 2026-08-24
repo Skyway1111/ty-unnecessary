@@ -152,7 +152,10 @@ fn malformed_request_fails_loudly() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(output.stdout.is_empty(), "no half-response on a bad request");
+    assert!(
+        output.stdout.is_empty(),
+        "no half-response on a bad request"
+    );
 }
 
 #[test]
@@ -173,4 +176,79 @@ fn unresolvable_query_file_fails_loudly() {
         .unwrap();
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
+}
+
+/// Two classes share a method name (CHA cannot pick); the receiver's type
+/// does. A constructor call targets the class; a `Callable`-typed parameter
+/// call has no definition to report.
+const EDGES_PY: &str = "\
+class C:
+    def m(self, x: int) -> int:
+        return x
+
+class D:
+    def m(self, x: int) -> int:
+        return x
+
+def helper():
+    return 1
+
+def use(c: C, cb):
+    c.m(1)
+    C()
+    cb(2)
+    helper()
+";
+
+#[test]
+fn call_edges_report_definitions() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("m.py"), EDGES_PY).unwrap();
+    let (stdout, ok) = run_batch(root, &serde_json::json!({"call_edges": true}));
+    assert!(ok, "batch run failed: {stdout}");
+    let response: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let edges: Vec<(u64, u64, u64, u64, Vec<u64>)> = response["call_edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                e["line"].as_u64().unwrap(),
+                e["col"].as_u64().unwrap(),
+                e["end_line"].as_u64().unwrap(),
+                e["end_col"].as_u64().unwrap(),
+                e["targets"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|t| t["line"].as_u64().unwrap())
+                    .collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        edges,
+        vec![
+            (13, 4, 13, 10, vec![2]), // c.m(1) -> C.m, not D.m
+            (14, 4, 14, 7, vec![1]),  // C() -> class C
+            (16, 4, 16, 12, vec![9]), // helper() -> def helper
+        ],
+        "{response}"
+    );
+    for edge in response["call_edges"].as_array().unwrap() {
+        assert!(edge["file"].as_str().unwrap().ends_with("m.py"));
+        assert!(
+            edge["targets"][0]["file"]
+                .as_str()
+                .unwrap()
+                .ends_with("m.py")
+        );
+    }
+
+    // not requested: absent from the work, empty in the response
+    let (stdout, ok) = run_batch(root, &serde_json::json!({}));
+    assert!(ok);
+    let response: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(response["call_edges"].as_array().unwrap().len(), 0);
 }

@@ -1,6 +1,6 @@
 {
   "repo": "lol-predictor",
-  "fork_exe": "..\\ty-unnecessary\\target\\release\\ty-unnecessary.exe",
+  "fork_exe": "..\\agent-codebase-checker\\.venv\\Scripts\\ty-unnecessary.exe",
   "pyright_total": 16,
   "fork_total": 15,
   "matched": 13,
@@ -17,8 +17,8 @@
       "matched": 11
     }
   },
-  "pyright_wall_s": 8.4,
-  "fork_wall_s": 0.9,
+  "pyright_wall_s": 8.2,
+  "fork_wall_s": 1.0,
   "divergences": [
     {
       "id": "lol-predictor:src/league_predictor/draft_grading/blend.py:737:19:reportUnnecessaryCast:missing",

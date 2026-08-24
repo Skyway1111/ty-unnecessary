@@ -16,6 +16,13 @@
 //! yield is directly an expression-statement value, flipping to `Unknown` once a yield
 //! value is consumed or a `yield from` appears.
 //!
+//! A `return <call>` whose callee is itself a plain unannotated function (or a bound
+//! method of one) contributes that callee's inferred return instead of the `Unknown` ty
+//! leaves at unannotated call sites — pyright propagates inferred returns through call
+//! chains; this bounded arm (direct returns only, cycle-guarded, depth-capped) mirrors
+//! the common shape. Calls nested in other expressions and names bound from calls stay
+//! as inferred.
+//!
 //! Async non-generator, overloaded and signature-updated functions keep their normal
 //! display: their return shape is wrapped (Coroutine) or already author-declared, and
 //! pyright parity for them is out of the oracle's scope.
@@ -29,7 +36,9 @@ use ty_python_core::{FileScopeId, SemanticIndex, semantic_index};
 use crate::Db;
 use crate::reachability::evaluate_reachability_constraint;
 use crate::types::infer::{ScopeInference, infer_complete_scope_types};
-use crate::types::{CallableType, KnownClass, ProgramEnvironment, Type, UnionBuilder};
+use crate::types::{
+    CallableType, FunctionType, KnownClass, ProgramEnvironment, Type, UnionBuilder,
+};
 
 /// Shim-facing (batch protocol): the string `report_revealed_type` would print for
 /// `ty` — the inferred-return patch plus ty's display, long unions preserved.
@@ -49,12 +58,37 @@ pub(crate) fn with_inferred_return<'db>(db: &'db dyn Db, ty: Type<'db>) -> Type<
     let Type::FunctionLiteral(function) = ty else {
         return ty;
     };
+    let mut visiting = vec![function];
+    match inferred_return(db, function, &mut visiting) {
+        Some(inferred) => Type::Callable(CallableType::single(
+            db,
+            function
+                .literal(db)
+                .last_definition
+                .signature(db)
+                .with_return_type(inferred),
+        )),
+        None => ty,
+    }
+}
+
+/// Call chains deeper than this keep the call's own (`Unknown`) type.
+const MAX_CHAIN_DEPTH: usize = 8;
+
+/// The inferred return of a plain unannotated function (`Generator[...]` /
+/// `AsyncGenerator[...]` for generators). `None` where the patch does not apply or
+/// some contributing expression has no inferred type — the stock display stays.
+fn inferred_return<'db>(
+    db: &'db dyn Db,
+    function: FunctionType<'db>,
+    visiting: &mut Vec<FunctionType<'db>>,
+) -> Option<Type<'db>> {
     if !function.is_plain_definition(db) {
-        return ty;
+        return None;
     }
     let overload = function.literal(db).last_definition;
     if overload.has_explicit_return_annotation(db) {
-        return ty;
+        return None;
     }
     let scope = overload.body_scope(db);
     let program_file = scope.program_file(db);
@@ -64,58 +98,45 @@ pub(crate) fn with_inferred_return<'db>(db: &'db dyn Db, ty: Type<'db>) -> Type<
     let node = scope.node(db).expect_function().node(&module);
     let is_generator = file_scope.is_generator_function(index);
     if node.is_async && !is_generator {
-        return ty;
+        return None;
     }
 
     let inference = infer_complete_scope_types(db, scope);
     let env = ProgramEnvironment::from_file(program_file);
-
-    let inferred = if is_generator {
-        let mut yields = YieldCollector::default();
-        yields.visit_body(&node.body);
-        let mut builder = UnionBuilder::new(db, &env);
-        for site in &yields.sites {
-            let Some(site_ty) = yield_site_type(db, &env, inference, site) else {
-                // missing inference for a contributing expression: stay honest,
-                // keep the stock `Unknown` display
-                return ty;
-            };
-            builder = builder.add(site_ty);
-        }
-        let yield_ty = builder.build();
-        let send_ty = if yields.consumed || yields.has_yield_from {
-            Type::unknown()
-        } else {
-            Type::any()
-        };
-        if node.is_async {
-            KnownClass::AsyncGenerator.to_specialized_instance(db, &env, &[yield_ty, send_ty])
-        } else {
-            let Some(return_ty) =
-                returns_union(db, scope, file_scope, index, inference, &env, &node.body)
-            else {
-                return ty;
-            };
-            KnownClass::Generator
-                .to_specialized_instance(db, &env, &[yield_ty, send_ty, return_ty])
-        }
-    } else {
-        let Some(return_ty) =
-            returns_union(db, scope, file_scope, index, inference, &env, &node.body)
-        else {
-            return ty;
-        };
-        return_ty
+    let returns = |visiting: &mut Vec<FunctionType<'db>>| {
+        returns_union(
+            db, scope, file_scope, index, inference, &env, &node.body, visiting,
+        )
     };
 
-    Type::Callable(CallableType::single(
-        db,
-        overload.signature(db).with_return_type(inferred),
-    ))
+    if !is_generator {
+        return returns(visiting);
+    }
+    let mut yields = YieldCollector::default();
+    yields.visit_body(&node.body);
+    let mut builder = UnionBuilder::new(db, &env);
+    for site in &yields.sites {
+        // missing inference for a contributing expression: stay honest,
+        // keep the stock `Unknown` display
+        builder = builder.add(yield_site_type(db, &env, inference, site)?);
+    }
+    let yield_ty = builder.build();
+    let send_ty = if yields.consumed || yields.has_yield_from {
+        Type::unknown()
+    } else {
+        Type::any()
+    };
+    Some(if node.is_async {
+        KnownClass::AsyncGenerator.to_specialized_instance(db, &env, &[yield_ty, send_ty])
+    } else {
+        let return_ty = returns(visiting)?;
+        KnownClass::Generator.to_specialized_instance(db, &env, &[yield_ty, send_ty, return_ty])
+    })
 }
 
 /// Union of the body's own return-expression types, plus `None` when the end of the
 /// scope is reachable. `None` when some return expression has no inferred type.
+#[allow(clippy::too_many_arguments)]
 fn returns_union<'db>(
     db: &'db dyn Db,
     scope: ScopeId<'db>,
@@ -124,6 +145,7 @@ fn returns_union<'db>(
     inference: &ScopeInference<'db>,
     env: &ProgramEnvironment<'db>,
     body: &[ast::Stmt],
+    visiting: &mut Vec<FunctionType<'db>>,
 ) -> Option<Type<'db>> {
     let mut returns = Vec::new();
     collect_returns(body, &mut returns);
@@ -131,7 +153,13 @@ fn returns_union<'db>(
     for ret in returns {
         match ret.value.as_deref() {
             Some(expr) => {
-                builder = builder.add(inference.try_expression_type(ast::ExprRef::from(expr))?);
+                let own = inference.try_expression_type(ast::ExprRef::from(expr))?;
+                let ty = if own.is_unknown() {
+                    chained_call_return(db, inference, expr, visiting).unwrap_or(own)
+                } else {
+                    own
+                };
+                builder = builder.add(ty);
             }
             None => builder = builder.add(Type::none(db, env)),
         }
@@ -144,6 +172,32 @@ fn returns_union<'db>(
         builder = builder.add(Type::none(db, env));
     }
     Some(builder.build())
+}
+
+/// The chain arm: for `return f(...)` where `f` is a plain unannotated function (or a
+/// bound method of one), that callee's inferred return. `None` keeps the call's own
+/// type: a cycle, the depth cap, or a callee the patch does not apply to.
+fn chained_call_return<'db>(
+    db: &'db dyn Db,
+    inference: &ScopeInference<'db>,
+    expr: &ast::Expr,
+    visiting: &mut Vec<FunctionType<'db>>,
+) -> Option<Type<'db>> {
+    let ast::Expr::Call(call) = expr else {
+        return None;
+    };
+    let callee = match inference.try_expression_type(ast::ExprRef::from(&*call.func))? {
+        Type::FunctionLiteral(function) => function,
+        Type::BoundMethod(method) => method.function(db),
+        _ => return None,
+    };
+    if visiting.len() >= MAX_CHAIN_DEPTH || visiting.contains(&callee) {
+        return None;
+    }
+    visiting.push(callee);
+    let inferred = inferred_return(db, callee, visiting);
+    visiting.pop();
+    inferred
 }
 
 /// What one yield site contributes to Y: the yielded expression's type (`None` for a
