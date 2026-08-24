@@ -151,7 +151,11 @@ fn main() -> Result<()> {
     let cwd = SystemPathBuf::from_path_buf(cwd)
         .map_err(|_| anyhow::anyhow!("current directory is not valid UTF-8"))?;
     let root = SystemPath::absolute(&args.root, &cwd);
-    let system = OsSystem::new(&cwd);
+    // The system anchors CLI-relative values (RelativeGlobPattern::cli /
+    // RelativePathBuf::cli) at its cwd. The oracle invokes this binary from an
+    // arbitrary directory, so anchor at the analyzed root — otherwise the
+    // config's exclude globs silently match nothing on a real tree.
+    let system = OsSystem::new(&root);
 
     let mut metadata = ProjectMetadata::discover(&root, &system)?;
     metadata.apply_configuration_files(&system)?;

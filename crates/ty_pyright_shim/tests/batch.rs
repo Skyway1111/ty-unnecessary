@@ -100,6 +100,45 @@ fn batch_contract() {
 }
 
 #[test]
+fn config_excludes_hold_on_a_real_tree() {
+    // exclude globs anchor at the analyzed root, not the invoking cwd:
+    // an excluded vendored dir must contribute no diagnostics
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("m.py"), MAIN_PY).unwrap();
+    std::fs::create_dir_all(root.join("_vendored/toolchain")).unwrap();
+    std::fs::write(
+        root.join("_vendored/toolchain/bad.py"),
+        "import missing_module_xyz\n",
+    )
+    .unwrap();
+    let cfg = root.join("pyrightconfig.json");
+    std::fs::write(
+        &cfg,
+        r#"{"reportMissingImports": "warning", "exclude": ["**/_vendored"]}"#,
+    )
+    .unwrap();
+    let request_path = root.join("request.json");
+    std::fs::write(&request_path, "{}").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ty-unnecessary"))
+        .arg("--batch")
+        .arg(&request_path)
+        .arg("--project")
+        .arg(&cfg)
+        .arg(root)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let response: serde_json::Value =
+        serde_json::from_str(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
+    assert_eq!(
+        response["diagnostics"].as_array().unwrap().len(),
+        0,
+        "excluded dir leaked diagnostics: {response}"
+    );
+}
+
+#[test]
 fn malformed_request_fails_loudly() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
