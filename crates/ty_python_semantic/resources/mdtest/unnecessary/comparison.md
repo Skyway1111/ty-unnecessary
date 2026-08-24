@@ -100,6 +100,41 @@ def annotated(v: float) -> None:
     v == 0
 ```
 
+## Literal-inferred numerics stay silent
+
+A numeric whose exact form was *inferred from a literal* (`x = 2.0`, a bare `2.0` or `2j`
+operand) behaves like the promoted form, not the strict narrowed one: pyright is silent on
+all of these. Pinned against basedpyright 1.39.10 with out-of-corpus probes (2026-08-23) —
+the same probe run that confirmed the narrowed/annotated split above; this is why
+`check_unnecessary_comparison`'s `strict_numeric` keying exists rather than an
+unconditional literal-promotion exception.
+
+```toml
+[rules]
+unnecessary-comparison = "error"
+```
+
+```py
+def inferred_float() -> None:
+    x = 2.0
+    if x == 0:
+        ...
+    if 2.0 == 0:
+        ...
+
+def inferred_complex() -> None:
+    z = 2j
+    if z == 0:
+        ...
+    if 2j == 0.0:
+        ...
+
+def declared_promoted() -> None:
+    x: float = 2.0
+    if x == 0:
+        ...
+```
+
 ## Narrowed `Unknown` stays comparable
 
 pyright has no intersection types: narrowing an `Unknown` value with `!=` leaves it
