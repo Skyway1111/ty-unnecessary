@@ -31,6 +31,8 @@
 //! `(file, line, rule)` identity (sightline's counterfactual baseline key).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::Write as _;
+use std::io::Write as _;
 
 use anyhow::{Context, Result, anyhow};
 use ruff_db::diagnostic::{Diagnostic, DiagnosticId};
@@ -85,6 +87,12 @@ struct Overlay {
     content: String,
 }
 
+fn resolve(db: &ProjectDatabase, root: &SystemPath, rel: &str) -> Result<File> {
+    let path = SystemPathBuf::from(root.as_str()).join(rel);
+    system_path_to_file(db, &path)
+        .map_err(|_| anyhow!("request names a file the project cannot resolve: `{rel}`"))
+}
+
 pub(crate) fn run(
     db: &mut ProjectDatabase,
     root: &SystemPath,
@@ -94,12 +102,6 @@ pub(crate) fn run(
         .with_context(|| format!("failed to read batch request `{request_path}`"))?;
     let request: Request =
         serde_json::from_str(&text).context("batch request is not valid JSON")?;
-
-    fn resolve(db: &ProjectDatabase, root: &SystemPath, rel: &str) -> Result<File> {
-        let path = SystemPathBuf::from(root.as_str()).join(rel);
-        system_path_to_file(db, &path)
-            .map_err(|_| anyhow!("request names a file the project cannot resolve: `{rel}`"))
-    }
 
     // -- expr queries: append reveal_type lines in memory, before the base check
     let mut appends_by_file: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
@@ -121,7 +123,7 @@ pub(crate) fn run(
         }
         let mut line = content.matches('\n').count();
         for (id, expr) in entries {
-            content.push_str(&format!("reveal_type({expr})\n"));
+            let _ = writeln!(content, "reveal_type({expr})");
             line += 1;
             reveal_ids.insert((file, line), id.clone());
         }
@@ -206,7 +208,6 @@ pub(crate) fn run(
     });
     let mut stdout = std::io::stdout().lock();
     serde_json::to_writer(&mut stdout, &output)?;
-    use std::io::Write;
     stdout.write_all(b"\n")?;
     Ok(())
 }

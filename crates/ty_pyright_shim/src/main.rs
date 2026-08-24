@@ -138,7 +138,7 @@ fn main() -> Result<()> {
     // The CLI flag wins over the config key, matching basedpyright 1.39.10 (which
     // no longer recognizes "pythonPath" in the config at all).
     if args.python_path.is_some() {
-        config.python_path = args.python_path.clone();
+        config.python_path.clone_from(&args.python_path);
     }
 
     rayon::ThreadPoolBuilder::new()
