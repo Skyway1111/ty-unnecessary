@@ -3,8 +3,8 @@
   "queries_pyright": 4568,
   "queries_fork": 4624,
   "shared": 4566,
-  "exact": 2298,
-  "algebra_equivalent": 2538,
+  "exact": 2300,
+  "algebra_equivalent": 2540,
   "only_pyright": [
     "q3435",
     "q3437"
@@ -157,7 +157,7 @@
     },
     {
       "query": "q1174",
-      "pyright": "Tensor",
+      "pyright": "Tensor | Unknown",
       "fork": "Unknown"
     },
     {
@@ -6381,11 +6381,6 @@
       "fork": "(skill_db) -> None"
     },
     {
-      "query": "r212",
-      "pyright": "(seq: list[Unknown], n: int) -> Generator[list[Unknown], Any, None]",
-      "fork": "(seq: list[Unknown], n: int) -> Unknown"
-    },
-    {
       "query": "r2120",
       "pyright": "(skill_db: Unknown) -> None",
       "fork": "(skill_db) -> None"
@@ -6814,11 +6809,6 @@
       "query": "r2244",
       "pyright": "(league_id: Unknown, expected: Unknown) -> None",
       "fork": "(league_id, expected) -> Unknown"
-    },
-    {
-      "query": "r2248",
-      "pyright": "(path: Path) -> Generator[tuple[str, int], Any, None]",
-      "fork": "(path: Path) -> Unknown"
     },
     {
       "query": "r225",
@@ -8063,7 +8053,7 @@
     {
       "query": "r46",
       "pyright": "(string: Unknown) -> Generator[tuple[int, Unknown], Any, None]",
-      "fork": "(string) -> Unknown"
+      "fork": "(string) -> Generator[tuple[int, Unknown], Any, None]"
     },
     {
       "query": "r460",
@@ -10277,7 +10267,7 @@
     "33": 2,
     "34": 2,
     "35": 7,
-    "36": 16,
+    "36": 15,
     "37": 20,
     "39": 16,
     "4": 3,
@@ -10289,6 +10279,6 @@
   },
   "notes_pyright": [],
   "notes_fork": [],
-  "collect_wall_s_pyright": 50.8,
-  "collect_wall_s_fork": 29.8
+  "collect_wall_s_pyright": 48.6,
+  "collect_wall_s_fork": 28.1
 }

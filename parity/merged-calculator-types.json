@@ -3,8 +3,8 @@
   "queries_pyright": 12744,
   "queries_fork": 13530,
   "shared": 12735,
-  "exact": 5264,
-  "algebra_equivalent": 6571,
+  "exact": 5268,
+  "algebra_equivalent": 6575,
   "only_pyright": [
     "q172",
     "q2484",
@@ -7295,11 +7295,6 @@
       "fork": "(data, ranks, ap=..., stats=None, options=None, target=None) -> dict[str, dict[str, Any]]"
     },
     {
-      "query": "r1332",
-      "pyright": "(root: AST) -> Generator[AST, Any, None]",
-      "fork": "(root: AST) -> Unknown"
-    },
-    {
       "query": "r1333",
       "pyright": "(item: str) -> dict[str, Any]",
       "fork": "(item: str) -> Unknown"
@@ -7565,11 +7560,6 @@
       "fork": "(self) -> None"
     },
     {
-      "query": "r1444",
-      "pyright": "() -> Generator[tuple[AllyProducer, str, DeclaredRamp], Any, None]",
-      "fork": "() -> Unknown"
-    },
-    {
       "query": "r1445",
       "pyright": "(self: TestDeclaredRampSubjects) -> None",
       "fork": "(self) -> None"
@@ -7783,11 +7773,6 @@
       "query": "r1675",
       "pyright": "(tmp_path: Unknown) -> None",
       "fork": "(tmp_path) -> None"
-    },
-    {
-      "query": "r1678",
-      "pyright": "() -> Generator[Path, Any, None]",
-      "fork": "() -> Unknown"
     },
     {
       "query": "r168",
@@ -11542,7 +11527,7 @@
     {
       "query": "r2956",
       "pyright": "(obj: Unknown, path: str = reveal_type(\"\")) -> Generator[str | Unknown, Unknown, None]",
-      "fork": "(obj, path=\"\") -> Unknown"
+      "fork": "(obj, path=\"\") -> Generator[str | Unknown, Unknown, None]"
     },
     {
       "query": "r2957",
@@ -12742,7 +12727,7 @@
     {
       "query": "r3306",
       "pyright": "(contract: dict[Unknown, Unknown]) -> Generator[tuple[Literal['main', 'enemy', 'ally'], Unknown, Unknown] | tuple[Literal['scenario'], Unknown, Unknown] | tuple[Literal['controls'], Unknown, Unknown], Any, None]",
-      "fork": "(contract: dict[Unknown, Unknown]) -> Unknown"
+      "fork": "(contract: dict[Unknown, Unknown]) -> Generator[tuple[Literal[\"main\", \"enemy\", \"ally\"], Unknown, Unknown] | tuple[Literal[\"scenario\"], Unknown, Unknown] | tuple[Literal[\"controls\"], Unknown, Unknown], Any, None]"
     },
     {
       "query": "r3307",
@@ -13617,7 +13602,7 @@
     {
       "query": "r36",
       "pyright": "(string: Unknown) -> Generator[tuple[int, Unknown], Any, None]",
-      "fork": "(string) -> Unknown"
+      "fork": "(string) -> Generator[tuple[int, Unknown], Any, None]"
     },
     {
       "query": "r360",
@@ -26640,11 +26625,6 @@
       "fork": "(item) -> Unknown"
     },
     {
-      "query": "r68",
-      "pyright": "() -> Generator[Path, Any, None]",
-      "fork": "() -> Unknown"
-    },
-    {
       "query": "r6802",
       "pyright": "(cast_timeline: Unknown) -> list[dict[str, Any]]",
       "fork": "(cast_timeline) -> list[dict[str, Any]]"
@@ -27527,7 +27507,7 @@
     {
       "query": "r7148",
       "pyright": "() -> Generator[dict[str, Unknown], Any, None]",
-      "fork": "() -> Unknown"
+      "fork": "() -> Generator[Unknown, Any, None]"
     },
     {
       "query": "r7149",
@@ -31705,7 +31685,7 @@
     "33": 4,
     "34": 5,
     "35": 5,
-    "36": 38,
+    "36": 36,
     "37": 22,
     "38": 5,
     "39": 700,
@@ -31719,6 +31699,6 @@
   },
   "notes_pyright": [],
   "notes_fork": [],
-  "collect_wall_s_pyright": 145.4,
-  "collect_wall_s_fork": 114.2
+  "collect_wall_s_pyright": 137.8,
+  "collect_wall_s_fork": 106.3
 }

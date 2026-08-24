@@ -1,6 +1,6 @@
 {
   "repo": "merged-calculator",
-  "fork_exe": "target\\release\\ty-unnecessary.exe",
+  "fork_exe": "..\\ty-unnecessary\\target\\release\\ty-unnecessary.exe",
   "pyright_total": 131,
   "fork_total": 132,
   "matched": 130,
@@ -17,8 +17,8 @@
       "matched": 126
     }
   },
-  "pyright_wall_s": 14.6,
-  "fork_wall_s": 2.4,
+  "pyright_wall_s": 14.0,
+  "fork_wall_s": 2.1,
   "divergences": [
     {
       "id": "merged-calculator:scripts/coverage_census.py:367:15:reportUnnecessaryIsInstance:missing",
