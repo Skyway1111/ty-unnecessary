@@ -43,6 +43,7 @@ SIGHTLINE_ROOT = Path(
 )
 sys.path.insert(0, str(SIGHTLINE_ROOT / "src"))
 
+from shadow import make_shadow  # noqa: E402
 from sightline.provers.oracle import Oracle, OracleDiag, detect_python_env  # noqa: E402
 
 # v1 criterion 2: measured on the deps-resolved corpus 2026-08-23 (lol-predictor 81.2%
@@ -152,7 +153,7 @@ def compare(root: Path, fork_exe: Path) -> Comparison:
     print(f"{root.name}: excludes={excludes} python={python_exe}")
     with tempfile.TemporaryDirectory(prefix="ty-parity-") as td:
         shadow = Path(td) / "tree"
-        Oracle(root, excludes=excludes, python_exe=python_exe).make_shadow(shadow)
+        make_shadow(root, excludes, shadow)
         pyright_diags, pyright_wall = run_side(
             shadow, excludes, python_exe, exe=basedpyright_exe(),
             label="basedpyright",

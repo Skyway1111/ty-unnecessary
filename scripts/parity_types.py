@@ -61,6 +61,7 @@ def make_legacy_oracle_class():
     import re
     import tempfile
 
+    from shadow import make_shadow
     from sightline.provers.oracle import Oracle, OracleDiag
 
     _REVEAL_RE = re.compile(r'Type of "(?s:.*)" is "(.*)"$')
@@ -123,7 +124,7 @@ def make_legacy_oracle_class():
                 return
             with tempfile.TemporaryDirectory(prefix="sightline-shadow-") as td:
                 shadow = Path(td) / "tree"
-                self.make_shadow(shadow)
+                make_shadow(self.root, self.excludes, shadow)
                 key_by_pos, spans = self._inject(shadow, queries)
                 raw = self._run(shadow, label="diagnostics+types")
             self._attempted_ids = {q.id for q in queries}
@@ -158,7 +159,7 @@ def make_legacy_oracle_class():
                 }
             with tempfile.TemporaryDirectory(prefix="sightline-shadow-") as td:
                 shadow = Path(td) / "tree"
-                self.make_shadow(shadow)
+                make_shadow(self.root, self.excludes, shadow)
                 key_by_pos, _spans = self._inject(shadow, queries)
                 out = {}
                 for d in self._run(shadow, label="types"):
@@ -175,7 +176,7 @@ def make_legacy_oracle_class():
             for wid, files in worlds:
                 with tempfile.TemporaryDirectory(prefix="sightline-cf-") as td:
                     shadow = Path(td) / "tree"
-                    self.make_shadow(shadow)
+                    make_shadow(self.root, self.excludes, shadow)
                     for rel, content in files.items():
                         target = shadow / rel
                         if target.exists():
