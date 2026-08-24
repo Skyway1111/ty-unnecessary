@@ -1,0 +1,48 @@
+{
+  "repo": "merged-calculator",
+  "fork_exe": "target\\release\\ty-unnecessary.exe",
+  "pyright_total": 131,
+  "fork_total": 132,
+  "matched": 130,
+  "match_rate": 0.9924,
+  "per_rule": {
+    "reportUnnecessaryComparison": {
+      "pyright": 4,
+      "fork": 4,
+      "matched": 4
+    },
+    "reportUnnecessaryIsInstance": {
+      "pyright": 127,
+      "fork": 128,
+      "matched": 126
+    }
+  },
+  "pyright_wall_s": 13.5,
+  "fork_wall_s": 2.0,
+  "divergences": [
+    {
+      "id": "merged-calculator:scripts/coverage_census.py:367:15:reportUnnecessaryIsInstance:missing",
+      "side": "missing",
+      "rule": "reportUnnecessaryIsInstance",
+      "polarity": "always",
+      "message": "Unnecessary isinstance call; \"dict[Unknown, Unknown]\" is always an instance of \"dict[Unknown, Unknown]\"",
+      "class": "ty-worse"
+    },
+    {
+      "id": "merged-calculator:src/calculator/item_behavior.py:3133:11:reportUnnecessaryIsInstance:extra",
+      "side": "extra",
+      "rule": "reportUnnecessaryIsInstance",
+      "polarity": "always",
+      "message": "Unnecessary isinstance call; \"DefenseMechanic\" is always an instance of \"DefenseMechanic\"",
+      "class": "ty-better"
+    },
+    {
+      "id": "merged-calculator:src/calculator/item_behavior.py:3456:11:reportUnnecessaryIsInstance:extra",
+      "side": "extra",
+      "rule": "reportUnnecessaryIsInstance",
+      "polarity": "always",
+      "message": "Unnecessary isinstance call; \"StatAvailability\" is always an instance of \"StatAvailability\"",
+      "class": "ty-better"
+    }
+  ]
+}

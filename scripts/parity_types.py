@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -69,9 +70,14 @@ def main() -> int:
         return tuple(sorted(base for part in split_union(type_str) for base in deliteral(part)))
 
     print(f"{root.name}: basedpyright pass")
+    started = time.monotonic()
     base_answers, base_rules, base_notes = run_collect(root, None)
-    print(f"{root.name}: fork pass")
+    base_wall = time.monotonic() - started
+    print(f"{root.name}: fork pass ({base_wall:.1f}s for basedpyright)")
+    started = time.monotonic()
     fork_answers, fork_rules, fork_notes = run_collect(root, args.fork.resolve())
+    fork_wall = time.monotonic() - started
+    print(f"  collect walls: basedpyright {base_wall:.1f}s, fork {fork_wall:.1f}s")
 
     shared = sorted(set(base_answers) & set(fork_answers))
     exact = sum(1 for q in shared if base_answers[q] == fork_answers[q])
@@ -108,6 +114,8 @@ def main() -> int:
         "findings_by_rule_fork": dict(sorted(fork_rules.items())),
         "notes_pyright": base_notes,
         "notes_fork": fork_notes,
+        "collect_wall_s_pyright": round(base_wall, 1),
+        "collect_wall_s_fork": round(fork_wall, 1),
     }
     args.receipt.mkdir(parents=True, exist_ok=True)
     path = args.receipt / f"{root.name}-types.json"

@@ -1,0 +1,61 @@
+{
+  "repo": "ROFL-File-Information",
+  "fork_exe": "target\\release\\ty-unnecessary.exe",
+  "pyright_total": 55,
+  "fork_total": 59,
+  "matched": 55,
+  "match_rate": 1.0,
+  "per_rule": {
+    "reportUnnecessaryComparison": {
+      "pyright": 24,
+      "fork": 26,
+      "matched": 24
+    },
+    "reportUnnecessaryContains": {
+      "pyright": 3,
+      "fork": 3,
+      "matched": 3
+    },
+    "reportUnnecessaryIsInstance": {
+      "pyright": 28,
+      "fork": 30,
+      "matched": 28
+    }
+  },
+  "pyright_wall_s": 5.8,
+  "fork_wall_s": 0.9,
+  "divergences": [
+    {
+      "id": "ROFL-File-Information:patch_compiler/binary_index.py:544:24:reportUnnecessaryIsInstance:extra",
+      "side": "extra",
+      "rule": "reportUnnecessaryIsInstance",
+      "polarity": "never",
+      "message": "Unnecessary isinstance call; \"Unknown & int & ~bool\" is never an instance of \"bool\"",
+      "class": "ty-better"
+    },
+    {
+      "id": "ROFL-File-Information:patch_compiler/protocol_resolution.py:2293:23:reportUnnecessaryIsInstance:extra",
+      "side": "extra",
+      "rule": "reportUnnecessaryIsInstance",
+      "polarity": "never",
+      "message": "Unnecessary isinstance call; \"dict[str, None | float | str | list[Divergent] | dict[str, Divergent]]\" is never an instance of \"list[Unknown]\"",
+      "class": "ty-worse"
+    },
+    {
+      "id": "ROFL-File-Information:rofl/decode/_patch_config.py:1648:15:reportUnnecessaryComparison:extra",
+      "side": "extra",
+      "rule": "reportUnnecessaryComparison",
+      "polarity": "true",
+      "message": "Condition will always evaluate to True since the types \"set[Unknown]\" and \"frozenset[str]\" have no overlap",
+      "class": "ty-better"
+    },
+    {
+      "id": "ROFL-File-Information:rofl/decode/_patch_config.py:2089:15:reportUnnecessaryComparison:extra",
+      "side": "extra",
+      "rule": "reportUnnecessaryComparison",
+      "polarity": "true",
+      "message": "Condition will always evaluate to True since the types \"set[Unknown]\" and \"frozenset[str]\" have no overlap",
+      "class": "ty-better"
+    }
+  ]
+}

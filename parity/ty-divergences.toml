@@ -1,0 +1,56 @@
+# Divergence ledger for the ty-unnecessary fork vs basedpyright 1.39.10 (pyright 1.1.412).
+#
+# Every (repo, file, line, col, rule, side) the differential harness finds unmatched must be
+# classified here or `scripts/diff_pyright.py` fails (v1 criterion 3: no silent divergence).
+#   side  = "missing" (pyright fires, fork does not) | "extra" (fork fires, pyright does not)
+#   class = "ty-better" (a shown pyright false positive the fork avoids, or a fork-only
+#           true positive pyright misses) | "ty-worse" (fork misses a real redundancy or
+#           fires wrongly; carries a fix/won't-fix note)
+# Corpus repos are read-only checkouts, so line/col keys are stable.
+
+["lol-predictor:src/league_predictor/draft_grading/champion_attributes/lolstaticdata/pull_champions_wiki.py:665:15:reportUnnecessaryComparison:missing"]
+class = "ty-better"
+note = "Genuine pyright FP: Ability.notes is declared `str` but the constructor assigns `data.get(\"notes\") ... else None` (pull_champions_wiki.py:651), so `notes is not None` is live at runtime. pyright trusts the declared type (the FP-K declared-over-dynamic lineage); ty treats the @dataclasses_json-decorated class as dynamic and stays silent."
+
+["lol-predictor:src/league_predictor/draft_grading/blend.py:737:19:reportUnnecessaryCast:missing"]
+class = "ty-worse"
+note = "Won't-fix (upstream ty capability, not ported code): pyright narrows `tuple[float, ...]` to `tuple[float, float, float, float]` from the `len(thresholds) != 4` guard on line 731, making the cast provably redundant; ty's len()-narrowing doesn't refine variadic tuples, and redundant-cast is ty's own pre-existing lint (plan: cast is covered by it, not ported)."
+
+["lol-predictor:src/league_predictor/predraft/evaluation/evaluate.py:468:11:reportUnnecessaryCast:missing"]
+class = "ty-worse"
+note = "Won't-fix (upstream ty lint semantics): ty's redundant-cast requires equivalence and refuses protocol-vs-nominal matches; pyright equates the duck-typed concrete families with the FeatureFamily/FamilyIndex protocols. The repo's own comment on line 466 documents the cast as intentional ('annotations are narrower than runtime'), so pyright's fire is itself arguable."
+
+["lol-predictor:src/league_predictor/predraft/ratings/player_performance.py:261:30:reportUnnecessaryCast:extra"]
+class = "ty-better"
+note = "Fork-only true positive: `dict.fromkeys(OPTIONAL_STATS, 0.0)` is `dict[str, float]` by the typeshed overload `fromkeys(Iterable[_T], _V) -> dict[_T, _V]` (runtime probe: returns a plain dict), so the cast is statically redundant; pyright's fromkeys inference misses it."
+
+["lol-predictor:src/league_predictor/predraft/ratings/player_performance.py:262:35:reportUnnecessaryCast:extra"]
+class = "ty-better"
+note = "Same as line 261: statically redundant fromkeys cast the fork proves and pyright misses."
+
+["ROFL-File-Information:patch_compiler/binary_index.py:544:24:reportUnnecessaryIsInstance:extra"]
+class = "ty-better"
+note = "Fork-only true positive from ty's precise cross-disjunct narrowing: a bool payload_chunk_width short-circuits chunk_invalid's first disjunct (isinstance(pcw, bool) at line 526 makes it True), so the final `not isinstance(pcw, bool)` conjunct can never see a bool - it is statically always true. pyright's narrowing does not compose constraints across or-arms."
+
+["ROFL-File-Information:patch_compiler/protocol_resolution.py:2293:23:reportUnnecessaryIsInstance:extra"]
+class = "ty-worse"
+note = "Won't-fix at rule level (upstream ty inference): both rows sources are declared dict[str, list[float]] so row is a list at runtime, but ty resolves row to a recursive JSON dict type (Divergent markers) and reports never-an-instance-of-list - wrong polarity. pyright types row too loosely to fire either way. Candidate upstream ty issue on recursive-alias resolution."
+
+["ROFL-File-Information:rofl/decode/_patch_config.py:1648:15:reportUnnecessaryComparison:extra"]
+class = "ty-better"
+note = "pyright emits 'Code is too complex to analyze' for load_patch_config (line 1631) and skips the whole function; on the same shape in isolation it fires identically (pinned by repro). The finding itself is the documented set-vs-frozenset equality unsoundness both checkers share by design; sightline's grounding demotes it downstream."
+
+["ROFL-File-Information:rofl/decode/_patch_config.py:2089:15:reportUnnecessaryComparison:extra"]
+class = "ty-better"
+note = "Same complexity-bail mechanism as line 1648."
+["merged-calculator:scripts/coverage_census.py:367:15:reportUnnecessaryIsInstance:missing"]
+class = "ty-worse"
+note = "Won't-fix (ty intersection algebra): the test type is gradual dict[Unknown, Unknown], and ty's `dict[Unknown, Unknown] & ~dict[Top]` does not simplify to Never, so the always-true (negative-narrow-is-Never) check stays ambiguous where pyright's filtered-type check proves it. A general assignability arm was tried and reverted: it fired on 100+ sites where ty infers concrete types and pyright holds Unknown."
+
+["merged-calculator:src/calculator/item_behavior.py:3133:11:reportUnnecessaryIsInstance:extra"]
+class = "ty-better"
+note = "Statically true per annotations: payload.mechanic is DefenseMechanic on every RulePayload union member that has it, so the isinstance is always true; pyright's attribute access on the 20-odd-member union degrades to Unknown and stays silent (enum isinstance in isolation fires on both, pinned by repro). The site is a deliberate runtime validator - the sightline-side suppression story, not the checker's."
+
+["merged-calculator:src/calculator/item_behavior.py:3456:11:reportUnnecessaryIsInstance:extra"]
+class = "ty-better"
+note = "Same union-attribute mechanism as line 3133, for payload.availability: StatAvailability."

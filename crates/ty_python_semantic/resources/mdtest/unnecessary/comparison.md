@@ -57,6 +57,45 @@ def _(b: bool):
     b == 2  # error: [unnecessary-comparison]
 ```
 
+## Numeric promotions
+
+pyright's `assignType` bakes in the int → float → complex promotions, so mixed-rank numeric
+comparisons always overlap (`2.0 == 2` is `True` at runtime). Same-class comparisons of
+disjoint literals still use the literal arm.
+
+```toml
+[rules]
+unnecessary-comparison = "error"
+```
+
+```py
+def _(v: float, n: int, c: complex, b: bool):
+    v == n
+    v == int(v)
+    c == n
+    c == v
+    b == 1.0
+```
+
+## Narrowed `Unknown` stays comparable
+
+pyright has no intersection types: narrowing an `Unknown` value with `!=` leaves it
+`Unknown` there, which is comparable to anything. ty's `Unknown & ~Literal[...]` must
+project the same way.
+
+```toml
+[rules]
+unnecessary-comparison = "error"
+unnecessary-contains = "error"
+```
+
+```py
+def _(x, keep: list[int]):
+    if x != "--":
+        x == 3
+        x in keep
+```
+
 ## User classes and `__eq__`
 
 An `==` comparison of unrelated user-class instances is reported only when the left operand's

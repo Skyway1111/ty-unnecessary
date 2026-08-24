@@ -279,13 +279,29 @@ impl<'db> UnnecessaryChecker<'db, '_> {
         if self.assert_depth > 0 {
             return;
         }
+        // pyright's parse nodes fold parentheses into the operand, so a diagnostic on
+        // `(x := y) is not None` starts at the `(`. Mirror via `parenthesized_range`
+        // (an empty CommentRanges only misses parens containing comments, which then
+        // fall back to the bare operand range).
+        let source = ruff_db::source::source_text(self.db, self.program_file.file(self.db));
+        let comment_ranges = ruff_python_trivia::CommentRanges::default();
+        let operand_range = |expr: &ast::Expr| -> TextRange {
+            ruff_python_ast::parenthesize::parenthesized_range(
+                expr.into(),
+                compare.into(),
+                &comment_ranges,
+                source.as_str(),
+            )
+            .unwrap_or_else(|| expr.range())
+        };
         let operands: Vec<&ast::Expr> = std::iter::once(&*compare.left)
             .chain(compare.comparators.iter())
             .collect();
         for (index, op) in compare.ops.iter().enumerate() {
             let left = operands[index];
             let right = operands[index + 1];
-            let range = TextRange::new(left.start(), right.end());
+            let range =
+                TextRange::new(operand_range(left).start(), operand_range(right).end());
             match op {
                 ast::CmpOp::Eq | ast::CmpOp::NotEq | ast::CmpOp::Is | ast::CmpOp::IsNot => {
                     self.check_comparison_pair(left, *op, right, range);
@@ -514,9 +530,10 @@ impl<'db> UnnecessaryChecker<'db, '_> {
             }
 
             // pyright prints the classinfo filters converted to their instance form for
-            // both isinstance and issubclass messages.
+            // both isinstance and issubclass messages (unknown specialization, so a bare
+            // `list` displays as `list[Unknown]` like pyright, not `Top[list[...]]`).
             let class_display_ty = ClassInfoConstraintFunction::IsInstance
-                .generate_constraint(db, env, classinfo_ty, true, false)
+                .generate_constraint(db, env, classinfo_ty, true, true)
                 .unwrap_or(positive_constraint);
 
             let test_display = test_ty.display(db, env);
@@ -688,6 +705,76 @@ fn is_type_comparable<'db>(
     right: Type<'db>,
     assume_is_operator: bool,
 ) -> bool {
+    is_type_comparable_impl(db, env, left, right, assume_is_operator, false)
+}
+
+/// `strict_numeric` is set when a side came out of a narrowing projection
+/// (intersection / enum complement): pyright's isinstance-narrowed `float` is the strict
+/// class, which it does NOT treat as overlapping an int *literal*, while a `float` from an
+/// annotation is the promoted `int | float` form which does.
+fn is_type_comparable_impl<'db>(
+    db: &'db dyn Db,
+    env: &ProgramEnvironment<'db>,
+    left: Type<'db>,
+    right: Type<'db>,
+    assume_is_operator: bool,
+    strict_numeric: bool,
+) -> bool {
+    // pyright has no intersection types: where ty narrows to `T & ~X` (or keeps
+    // `Unknown & ~X`), pyright sees the un-negated base. Project an intersection to its
+    // concrete positive elements — pyright's positive `isinstance` narrowing *replaces*
+    // `Any` with the class, so a dynamic positive only wins when nothing concrete is
+    // left (`Unknown & ~X` behaves as `Unknown`; `Unknown & float` behaves as `float`).
+    fn project_intersection<'db>(
+        db: &'db dyn Db,
+        intersection: crate::types::IntersectionType<'db>,
+    ) -> Vec<Type<'db>> {
+        let concrete: Vec<Type<'db>> = intersection
+            .positive(db)
+            .iter()
+            .copied()
+            .filter(|p| !p.is_dynamic())
+            .collect();
+        concrete
+    }
+    // ty narrows enums to `EnumComplement` (the remaining members); pyright sees a plain
+    // literal union. Project through the equivalent intersection.
+    if let Type::EnumComplement(complement) = left {
+        return is_type_comparable_impl(
+            db,
+            env,
+            complement.to_intersection(db, env),
+            right,
+            assume_is_operator,
+            true,
+        );
+    }
+    if let Type::EnumComplement(complement) = right {
+        return is_type_comparable_impl(
+            db,
+            env,
+            left,
+            complement.to_intersection(db, env),
+            assume_is_operator,
+            true,
+        );
+    }
+
+    if let Type::Intersection(intersection) = left {
+        let concrete = project_intersection(db, intersection);
+        return concrete.is_empty()
+            || concrete.iter().any(|p| {
+                is_type_comparable_impl(db, env, *p, right, assume_is_operator, true)
+            });
+    }
+    if let Type::Intersection(intersection) = right {
+        let concrete = project_intersection(db, intersection);
+        return concrete.is_empty()
+            || concrete.iter().any(|p| {
+                is_type_comparable_impl(db, env, left, *p, assume_is_operator, true)
+            });
+    }
+
     if left.is_dynamic() || right.is_dynamic() {
         return true;
     }
@@ -779,6 +866,46 @@ fn is_type_comparable<'db>(
                     || right_generic.is_assignable_to(db, env, left_generic)
                 {
                     return true;
+                }
+            }
+
+            // pyright's `assignType` bakes in the numeric promotions (int -> float ->
+            // complex, with `bool` counting as `int`); ty's assignability does not, so
+            // mirror them here: two numeric classes of different promotion rank are
+            // comparable (`2.0 == 2` is True at runtime) — but, matching observed
+            // pyright behavior, promotion never applies to a numeric *literal* operand
+            // (strict `float == Literal[0]` is reported, `float == int` is not; a
+            // declared `float` parameter is ty's `int | float*` union, whose `int`
+            // member covers the literal comparisons without any promotion).
+            let literal_involved = matches!(left, Type::LiteralValue(..))
+                || matches!(right, Type::LiteralValue(..));
+            if let Some(right_instance) = right_instance
+                && !(strict_numeric && literal_involved)
+            {
+                let rank = |class: ClassType<'db>| -> Option<u8> {
+                    let mut found: Option<u8> = None;
+                    for base in class.class_literal(db).iter_mro(db) {
+                        let known = base
+                            .into_class()
+                            .and_then(|base| base.class_literal(db).known(db));
+                        let base_rank = match known {
+                            Some(KnownClass::Int) => Some(0),
+                            Some(KnownClass::Float) => Some(1),
+                            Some(KnownClass::Complex) => Some(2),
+                            _ => None,
+                        };
+                        if let Some(base_rank) = base_rank {
+                            found = Some(found.map_or(base_rank, |f| f.min(base_rank)));
+                        }
+                    }
+                    found
+                };
+                if let (Some(left_rank), Some(right_rank)) =
+                    (rank(left_class), rank(right_instance.class(db, env)))
+                {
+                    if left_rank != right_rank {
+                        return true;
+                    }
                 }
             }
 

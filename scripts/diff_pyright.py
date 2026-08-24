@@ -28,6 +28,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import tomllib
 from pathlib import Path
@@ -42,6 +43,16 @@ SIGHTLINE_ROOT = Path(
 sys.path.insert(0, str(SIGHTLINE_ROOT / "src"))
 
 from sightline.provers.oracle import Oracle, OracleDiag, detect_python_env  # noqa: E402
+
+# v1 criterion 2: measured on the deps-resolved corpus 2026-08-23 (lol-predictor 81.2%
+# over 16 pyright sites, ROFL-File-Information 100% over 55, merged-calculator 99.2%
+# over 131; pooled 198/202 = 98.0%), pinned with margin. A run below its floor fails
+# even with a fully classified ledger.
+MATCH_RATE_FLOORS = {
+    "lol-predictor": 0.80,
+    "ROFL-File-Information": 0.95,
+    "merged-calculator": 0.97,
+}
 
 POLARITY_PATTERNS = [
     (re.compile(r"always evaluate to True"), "true"),
@@ -102,7 +113,13 @@ def run_side(
 
 
 def compare(root: Path, fork_exe: Path) -> Comparison:
-    """Both oracle passes, sequentially (trap ledger: concurrent sidecars starve)."""
+    """Both oracle passes, sequentially (trap ledger: concurrent sidecars starve — keep
+    everything else off the oracle while this runs; a starved sidecar wedges, it doesn't
+    fail).
+
+    Both sides analyze one shared *shadow tree* (sources only), exactly like the
+    production fused pass: a real-tree run makes basedpyright enumerate `.venv`
+    (multi-GB on ML repos) and never finish."""
     excludes = corpus_excludes(root)
     python_exe = detect_python_env(root, None)
     if python_exe is None:
@@ -111,12 +128,15 @@ def compare(root: Path, fork_exe: Path) -> Comparison:
             "measured deps-resolved (plan: banned shortcuts)"
         )
     print(f"{root.name}: excludes={excludes} python={python_exe}")
-    pyright_diags, pyright_wall = run_side(
-        root, excludes, python_exe, exe=None, label="basedpyright"
-    )
-    fork_diags, fork_wall = run_side(
-        root, excludes, python_exe, exe=fork_exe, label="ty-unnecessary"
-    )
+    with tempfile.TemporaryDirectory(prefix="ty-parity-") as td:
+        shadow = Path(td) / "tree"
+        Oracle(root, excludes=excludes, python_exe=python_exe).make_shadow(shadow)
+        pyright_diags, pyright_wall = run_side(
+            shadow, excludes, python_exe, exe=None, label="basedpyright"
+        )
+        fork_diags, fork_wall = run_side(
+            shadow, excludes, python_exe, exe=fork_exe, label="ty-unnecessary"
+        )
     pyright_map = {DiagKey.of(d): d for d in pyright_diags}
     fork_map = {DiagKey.of(d): d for d in fork_diags}
     return Comparison(
@@ -213,6 +233,10 @@ def report(args: argparse.Namespace, comparison: Comparison) -> int:
         print(f"FAIL: {len(unclassified)} unclassified divergences (add to {args.ledger}):")
         for ident in unclassified[:40]:
             print(f"    {ident}")
+        return 1
+    floor = MATCH_RATE_FLOORS.get(repo)
+    if floor is not None and rate < floor:
+        print(f"FAIL: match rate {rate:.1%} fell below the pinned floor {floor:.0%}")
         return 1
     return 0
 

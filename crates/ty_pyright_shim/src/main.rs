@@ -23,12 +23,14 @@ use ty_python_semantic::lint::Level;
 struct Args {
     threads: usize,
     project_config: Option<String>,
+    python_path: Option<String>,
     root: String,
 }
 
 fn parse_args() -> Result<Args> {
     let mut threads = 4usize;
     let mut project_config = None;
+    let mut python_path = None;
     let mut root = None;
     let mut iter = std::env::args().skip(1);
     while let Some(arg) = iter.next() {
@@ -44,6 +46,9 @@ fn parse_args() -> Result<Args> {
             "--project" | "-p" => {
                 project_config = Some(iter.next().context("--project requires a value")?);
             }
+            "--pythonpath" => {
+                python_path = Some(iter.next().context("--pythonpath requires a value")?);
+            }
             other if other.starts_with("--") => {
                 // Ignore unknown pyright flags for drop-in compatibility.
             }
@@ -53,6 +58,7 @@ fn parse_args() -> Result<Args> {
     Ok(Args {
         threads,
         project_config,
+        python_path,
         root: root.context("missing root path argument")?,
     })
 }
@@ -118,7 +124,12 @@ fn pyright_rule(id: DiagnosticId) -> Option<&'static str> {
 
 fn main() -> Result<()> {
     let args = parse_args()?;
-    let config = read_pyright_config(args.project_config.as_deref())?;
+    let mut config = read_pyright_config(args.project_config.as_deref())?;
+    // The CLI flag wins over the config key, matching basedpyright 1.39.10 (which
+    // no longer recognizes "pythonPath" in the config at all).
+    if args.python_path.is_some() {
+        config.python_path = args.python_path.clone();
+    }
 
     rayon::ThreadPoolBuilder::new()
         .num_threads(args.threads)
@@ -237,8 +248,9 @@ fn convert(db: &ProjectDatabase, diagnostic: &Diagnostic) -> Option<serde_json::
     let (rule_field, severity, message) = if rule == "reveal" {
         // pyright: `Type of "<expr>" is "<type>"`. The oracle's regex wildcards the
         // expression, so a placeholder is fine; the type comes from ty's annotation
-        // message (a backtick-quoted type).
-        let type_text = annotation.get_message()?.trim_matches('`').to_string();
+        // message (a backtick-quoted type), normalized to pyright's display forms.
+        let type_text =
+            normalize_type_display(annotation.get_message()?.trim_matches('`'));
         let expr_text = source
             .as_str()
             .get(std::ops::Range::<usize>::from(range))
@@ -269,6 +281,55 @@ fn convert(db: &ProjectDatabase, diagnostic: &Diagnostic) -> Option<serde_json::
         entry["rule"] = serde_json::Value::String(rule.to_string());
     }
     Some(entry)
+}
+
+/// Rewrite ty type displays that sightline's type-string algebra would misread into
+/// pyright's forms: exact-form markers (`float*` -> `float`), module literals
+/// (`<module 'x'>` -> `Module("x")`), and named function signatures
+/// (`def f(x) -> R` -> `(x) -> R`).
+fn normalize_type_display(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(idx) = rest.find("<module '") {
+        out.push_str(&rest[..idx]);
+        let tail = &rest[idx + "<module '".len()..];
+        if let Some(end) = tail.find("'>") {
+            out.push_str("Module(\"");
+            out.push_str(&tail[..end]);
+            out.push_str("\")");
+            rest = &tail[end + 2..];
+        } else {
+            out.push_str("<module '");
+            rest = tail;
+        }
+    }
+    out.push_str(rest);
+
+    // `def name(...)` -> `(...)`; exact-form star markers dropped.
+    let mut result = String::with_capacity(out.len());
+    let bytes = out.as_bytes();
+    let mut skip_until = 0usize;
+    for (i, ch) in out.char_indices() {
+        if i < skip_until {
+            continue;
+        }
+        if ch == '*' && i > 0 && bytes[i - 1].is_ascii_alphanumeric() {
+            continue; // float* / complex* exact markers
+        }
+        if out[i..].starts_with("def ")
+            && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
+        {
+            if let Some(paren) = out[i..].find('(') {
+                let name = &out[i + 4..i + paren];
+                if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    skip_until = i + paren;
+                    continue;
+                }
+            }
+        }
+        result.push(ch);
+    }
+    result
 }
 
 /// ty renders inline code in diagnostic messages with backticks; pyright's messages quote

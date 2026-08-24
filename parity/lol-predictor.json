@@ -1,0 +1,64 @@
+{
+  "repo": "lol-predictor",
+  "fork_exe": "target\\release\\ty-unnecessary.exe",
+  "pyright_total": 16,
+  "fork_total": 15,
+  "matched": 13,
+  "match_rate": 0.8125,
+  "per_rule": {
+    "reportUnnecessaryCast": {
+      "pyright": 4,
+      "fork": 4,
+      "matched": 2
+    },
+    "reportUnnecessaryComparison": {
+      "pyright": 12,
+      "fork": 11,
+      "matched": 11
+    }
+  },
+  "pyright_wall_s": 8.0,
+  "fork_wall_s": 0.9,
+  "divergences": [
+    {
+      "id": "lol-predictor:src/league_predictor/draft_grading/blend.py:737:19:reportUnnecessaryCast:missing",
+      "side": "missing",
+      "rule": "reportUnnecessaryCast",
+      "polarity": "",
+      "message": "Unnecessary \"cast\" call; type is already \"tuple[float, float, float, float]\"",
+      "class": "ty-worse"
+    },
+    {
+      "id": "lol-predictor:src/league_predictor/draft_grading/champion_attributes/lolstaticdata/pull_champions_wiki.py:665:15:reportUnnecessaryComparison:missing",
+      "side": "missing",
+      "rule": "reportUnnecessaryComparison",
+      "polarity": "true",
+      "message": "Condition will always evaluate to True since the types \"str\" and \"None\" have no overlap",
+      "class": "ty-better"
+    },
+    {
+      "id": "lol-predictor:src/league_predictor/predraft/evaluation/evaluate.py:468:11:reportUnnecessaryCast:missing",
+      "side": "missing",
+      "rule": "reportUnnecessaryCast",
+      "polarity": "",
+      "message": "Unnecessary \"cast\" call; type is already \"tuple[list[FeatureFamily], dict[str, FamilyIndex]]\"",
+      "class": "ty-worse"
+    },
+    {
+      "id": "lol-predictor:src/league_predictor/predraft/ratings/player_performance.py:261:30:reportUnnecessaryCast:extra",
+      "side": "extra",
+      "rule": "reportUnnecessaryCast",
+      "polarity": "",
+      "message": "Value is already of type \"dict[str, float]\"",
+      "class": "ty-better"
+    },
+    {
+      "id": "lol-predictor:src/league_predictor/predraft/ratings/player_performance.py:262:35:reportUnnecessaryCast:extra",
+      "side": "extra",
+      "rule": "reportUnnecessaryCast",
+      "polarity": "",
+      "message": "Value is already of type \"dict[str, float]\"",
+      "class": "ty-better"
+    }
+  ]
+}
