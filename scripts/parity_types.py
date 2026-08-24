@@ -11,7 +11,10 @@ pyright's (quote style in literals, ``<subclass of ...>`` synthetics).
 
 Usage:  python scripts/parity_types.py <repo-root> --fork <ty-unnecessary.exe>
 
-Cost: two full sightline collect passes (each one oracle run), sequential.
+Cost: two full sightline collect passes, sequential. The basedpyright side
+runs the harness-local legacy transport, whose counterfactual worlds are full
+shadow re-checks — one basedpyright pass per world (merged + suspects), ~12
+minutes on ROFL-File-Information. Build-time only; budget accordingly.
 """
 
 from __future__ import annotations
