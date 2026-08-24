@@ -9,18 +9,27 @@
 //! the scope's final inference), plus `None` when the end of the scope is reachable.
 //! A function that never returns reveals `Never`, mirroring pyright's `NoReturn`.
 //!
-//! Async functions, generators, overloaded and signature-updated functions keep their
-//! normal display: their return shape is wrapped (Coroutine/Generator) or already
-//! author-declared, and pyright parity for them is out of the oracle's scope.
+//! Generators reveal `Generator[Y, S, R]` (`AsyncGenerator[Y, S]` when async), pinned
+//! against basedpyright 1.39.10 out-of-corpus probes (2026-08-23): Y is the union of
+//! yield-expression types (`yield from` contributes the delegate's element type), R the
+//! same returns-plus-fallthrough union as plain functions, and S is `Any` while every
+//! yield is directly an expression-statement value, flipping to `Unknown` once a yield
+//! value is consumed or a `yield from` appears.
+//!
+//! Async non-generator, overloaded and signature-updated functions keep their normal
+//! display: their return shape is wrapped (Coroutine) or already author-declared, and
+//! pyright parity for them is out of the oracle's scope.
 
 use ruff_db::parsed::parsed_module;
 use ruff_python_ast as ast;
-use ty_python_core::semantic_index;
+use ruff_python_ast::visitor::source_order::{self, SourceOrderVisitor};
+use ty_python_core::scope::ScopeId;
+use ty_python_core::{FileScopeId, SemanticIndex, semantic_index};
 
 use crate::Db;
 use crate::reachability::evaluate_reachability_constraint;
-use crate::types::infer::infer_complete_scope_types;
-use crate::types::{CallableType, ProgramEnvironment, Type, UnionBuilder};
+use crate::types::infer::{ScopeInference, infer_complete_scope_types};
+use crate::types::{CallableType, KnownClass, ProgramEnvironment, Type, UnionBuilder};
 
 /// The revealed form of `ty`: unannotated plain functions get their inferred return.
 pub(crate) fn with_inferred_return<'db>(db: &'db dyn Db, ty: Type<'db>) -> Type<'db> {
@@ -38,32 +47,80 @@ pub(crate) fn with_inferred_return<'db>(db: &'db dyn Db, ty: Type<'db>) -> Type<
     let program_file = scope.program_file(db);
     let index = semantic_index(db, program_file);
     let file_scope = scope.file_scope_id(db);
-    if file_scope.is_generator_function(index) {
-        return ty;
-    }
     let module = parsed_module(db, scope.python_file(db)).load(db);
     let node = scope.node(db).expect_function().node(&module);
-    if node.is_async {
+    let is_generator = file_scope.is_generator_function(index);
+    if node.is_async && !is_generator {
         return ty;
     }
 
     let inference = infer_complete_scope_types(db, scope);
     let env = ProgramEnvironment::from_file(program_file);
+
+    let inferred = if is_generator {
+        let mut yields = YieldCollector::default();
+        yields.visit_body(&node.body);
+        let mut builder = UnionBuilder::new(db, &env);
+        for site in &yields.sites {
+            let Some(site_ty) = yield_site_type(db, &env, inference, site) else {
+                // missing inference for a contributing expression: stay honest,
+                // keep the stock `Unknown` display
+                return ty;
+            };
+            builder = builder.add(site_ty);
+        }
+        let yield_ty = builder.build();
+        let send_ty = if yields.consumed || yields.has_yield_from {
+            Type::unknown()
+        } else {
+            Type::any()
+        };
+        if node.is_async {
+            KnownClass::AsyncGenerator.to_specialized_instance(db, &env, &[yield_ty, send_ty])
+        } else {
+            let Some(return_ty) =
+                returns_union(db, scope, file_scope, index, inference, &env, &node.body)
+            else {
+                return ty;
+            };
+            KnownClass::Generator
+                .to_specialized_instance(db, &env, &[yield_ty, send_ty, return_ty])
+        }
+    } else {
+        let Some(return_ty) =
+            returns_union(db, scope, file_scope, index, inference, &env, &node.body)
+        else {
+            return ty;
+        };
+        return_ty
+    };
+
+    Type::Callable(CallableType::single(
+        db,
+        overload.signature(db).with_return_type(inferred),
+    ))
+}
+
+/// Union of the body's own return-expression types, plus `None` when the end of the
+/// scope is reachable. `None` when some return expression has no inferred type.
+fn returns_union<'db>(
+    db: &'db dyn Db,
+    scope: ScopeId<'db>,
+    file_scope: FileScopeId,
+    index: &SemanticIndex,
+    inference: &ScopeInference<'db>,
+    env: &ProgramEnvironment<'db>,
+    body: &[ast::Stmt],
+) -> Option<Type<'db>> {
     let mut returns = Vec::new();
-    collect_returns(&node.body, &mut returns);
-    let mut builder = UnionBuilder::new(db, &env);
+    collect_returns(body, &mut returns);
+    let mut builder = UnionBuilder::new(db, env);
     for ret in returns {
         match ret.value.as_deref() {
             Some(expr) => {
-                let Some(expr_ty) = inference.try_expression_type(ast::ExprRef::from(expr))
-                else {
-                    // missing inference for a return expression: stay honest,
-                    // keep the stock `Unknown` display
-                    return ty;
-                };
-                builder = builder.add(expr_ty);
+                builder = builder.add(inference.try_expression_type(ast::ExprRef::from(expr))?);
             }
-            None => builder = builder.add(Type::none(db, &env)),
+            None => builder = builder.add(Type::none(db, env)),
         }
     }
     let use_def = index.use_def_map(file_scope);
@@ -71,14 +128,92 @@ pub(crate) fn with_inferred_return<'db>(db: &'db dyn Db, ty: Type<'db>) -> Type<
         !evaluate_reachability_constraint(db, scope, use_def.end_of_scope_reachability())
             .is_always_false();
     if end_reachable {
-        builder = builder.add(Type::none(db, &env));
+        builder = builder.add(Type::none(db, env));
     }
-    let inferred = builder.build();
+    Some(builder.build())
+}
 
-    Type::Callable(CallableType::single(
-        db,
-        overload.signature(db).with_return_type(inferred),
-    ))
+/// What one yield site contributes to Y: the yielded expression's type (`None` for a
+/// bare `yield`), or the delegate's element type for `yield from`.
+fn yield_site_type<'db>(
+    db: &'db dyn Db,
+    env: &ProgramEnvironment<'db>,
+    inference: &ScopeInference<'db>,
+    site: &YieldSite<'_>,
+) -> Option<Type<'db>> {
+    match site {
+        YieldSite::Yield(y) => match y.value.as_deref() {
+            Some(expr) => inference.try_expression_type(ast::ExprRef::from(expr)),
+            None => Some(Type::none(db, env)),
+        },
+        YieldSite::YieldFrom(yf) => {
+            let delegate = inference.try_expression_type(ast::ExprRef::from(&*yf.value))?;
+            Some(delegate.iterate(db, env).homogeneous_element_type(db, env))
+        }
+    }
+}
+
+enum YieldSite<'a> {
+    Yield(&'a ast::ExprYield),
+    YieldFrom(&'a ast::ExprYieldFrom),
+}
+
+/// Collects the yields belonging to one function scope (nested function and class
+/// bodies, and lambdas, are their own scopes), in source order, tracking whether any
+/// yield's value is consumed — i.e. the yield sits anywhere but directly as an
+/// expression-statement value.
+#[derive(Default)]
+struct YieldCollector<'a> {
+    sites: Vec<YieldSite<'a>>,
+    consumed: bool,
+    has_yield_from: bool,
+}
+
+impl<'a> YieldCollector<'a> {
+    fn visit_body(&mut self, body: &'a [ast::Stmt]) {
+        for stmt in body {
+            self.visit_stmt(stmt);
+        }
+    }
+}
+
+impl<'a> SourceOrderVisitor<'a> for YieldCollector<'a> {
+    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        match stmt {
+            ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
+            // statement-position yield: its value is not consumed
+            ast::Stmt::Expr(stmt_expr) => {
+                if let ast::Expr::Yield(y) = &*stmt_expr.value {
+                    self.sites.push(YieldSite::Yield(y));
+                    if let Some(value) = y.value.as_deref() {
+                        self.visit_expr(value);
+                    }
+                } else {
+                    source_order::walk_stmt(self, stmt);
+                }
+            }
+            _ => source_order::walk_stmt(self, stmt),
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        match expr {
+            ast::Expr::Lambda(_) => {}
+            ast::Expr::Yield(y) => {
+                self.sites.push(YieldSite::Yield(y));
+                self.consumed = true;
+                if let Some(value) = y.value.as_deref() {
+                    self.visit_expr(value);
+                }
+            }
+            ast::Expr::YieldFrom(yf) => {
+                self.sites.push(YieldSite::YieldFrom(yf));
+                self.has_yield_from = true;
+                self.visit_expr(&yf.value);
+            }
+            _ => source_order::walk_expr(self, expr),
+        }
+    }
 }
 
 /// Every `return` statement belonging to this body's own scope (nested function

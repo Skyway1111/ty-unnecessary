@@ -36,3 +36,10 @@ Type names *inside* messages come from ty's display (`Literal["a"]` vs pyright's
 cargo build --release -p ty_pyright_shim   # target/release/ty-unnecessary.exe
 cargo test -p ty_python_semantic --test mdtest -- unnecessary
 ```
+
+The `-- unnecessary` filter is the fork's gate. The *full* mdtest suite carries 9
+upstream failures expected under the reveal patch: tests asserting stock
+`def f(...) -> Unknown` reveals for unannotated functions now see the inferred-return
+display (`annotations/self`, `call/methods`, `class/super`, `cycle`,
+`exception/control_flow`, `import/star`, `overloads`, `shadowing/function`,
+`ty_extensions`).
