@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -101,6 +102,23 @@ def corpus_excludes(root: Path) -> list[str]:
     return data.get("tool", {}).get("sightline", {}).get("excludes", [])
 
 
+def basedpyright_exe() -> Path:
+    """The comparator, resolved explicitly: sightline's `default_exe` is the
+    fork shim since the production switch, so relying on it here would
+    silently self-compare (100% "bit-identity" of the fork against itself)."""
+    local = Path(sys.executable).parent / (
+        "basedpyright.exe" if sys.platform == "win32" else "basedpyright"
+    )
+    if local.exists():
+        return local
+    found = shutil.which("basedpyright")
+    if not found:
+        raise SystemExit(
+            "FAIL: basedpyright not found — install sightline's [parity] extra"
+        )
+    return Path(found)
+
+
 def run_side(
     root: Path, excludes: list[str], python_exe: Path, exe: Path | None, label: str
 ) -> tuple[list[OracleDiag], float]:
@@ -132,7 +150,8 @@ def compare(root: Path, fork_exe: Path) -> Comparison:
         shadow = Path(td) / "tree"
         Oracle(root, excludes=excludes, python_exe=python_exe).make_shadow(shadow)
         pyright_diags, pyright_wall = run_side(
-            shadow, excludes, python_exe, exe=None, label="basedpyright"
+            shadow, excludes, python_exe, exe=basedpyright_exe(),
+            label="basedpyright",
         )
         fork_diags, fork_wall = run_side(
             shadow, excludes, python_exe, exe=fork_exe, label="ty-unnecessary"

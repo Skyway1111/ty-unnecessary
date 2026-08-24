@@ -33,15 +33,34 @@ SIGHTLINE_ROOT = Path(
 sys.path.insert(0, str(SIGHTLINE_ROOT / "src"))
 
 
+def basedpyright_exe() -> Path:
+    """The comparator, resolved explicitly: sightline's `default_exe` is the
+    fork shim since the production switch — relying on it would self-compare."""
+    import shutil
+
+    local = Path(sys.executable).parent / (
+        "basedpyright.exe" if sys.platform == "win32" else "basedpyright"
+    )
+    if local.exists():
+        return local
+    found = shutil.which("basedpyright")
+    if not found:
+        raise SystemExit(
+            "FAIL: basedpyright not found — install sightline's [parity] extra"
+        )
+    return Path(found)
+
+
 def run_collect(root: Path, exe_override: Path | None):
-    """One full sightline collect; returns (answers, findings_by_rule, notes)."""
+    """One full sightline collect; returns (answers, findings_by_rule, notes).
+    exe_override None = the basedpyright comparator side."""
     import sightline.provers.oracle as oracle_module
     from sightline.config import load_config
     from sightline.gate import collect
 
     original = oracle_module.default_exe
-    if exe_override is not None:
-        oracle_module.default_exe = lambda: exe_override
+    exe = exe_override if exe_override is not None else basedpyright_exe()
+    oracle_module.default_exe = lambda: exe
     try:
         config = load_config(root)
         facts, provers, kept, _suppressed, metrics = collect(root, config)

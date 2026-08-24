@@ -17,8 +17,8 @@
       "matched": 126
     }
   },
-  "pyright_wall_s": 13.5,
-  "fork_wall_s": 2.0,
+  "pyright_wall_s": 14.6,
+  "fork_wall_s": 2.4,
   "divergences": [
     {
       "id": "merged-calculator:scripts/coverage_census.py:367:15:reportUnnecessaryIsInstance:missing",

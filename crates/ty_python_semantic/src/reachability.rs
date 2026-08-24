@@ -679,7 +679,7 @@ fn analyze_non_terminal_call_range<'db>(
 ///
 /// Large scopes reuse canonical call ranges and sparse decision-diagram checkpoints; small scopes
 /// retain the direct evaluation path without creating either cached index.
-fn evaluate_reachability_constraint<'db>(
+pub(crate) fn evaluate_reachability_constraint<'db>(
     db: &'db dyn Db,
     scope: ScopeId<'db>,
     id: ScopedReachabilityConstraintId,

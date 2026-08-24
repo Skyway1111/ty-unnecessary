@@ -170,6 +170,7 @@ mod type_expansion;
 mod type_form;
 mod typed_dict;
 mod typevar;
+pub(crate) mod inferred_return;
 pub(crate) mod unnecessary;
 mod unpacker;
 mod variance;

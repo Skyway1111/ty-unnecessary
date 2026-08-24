@@ -22,8 +22,8 @@
       "matched": 28
     }
   },
-  "pyright_wall_s": 5.8,
-  "fork_wall_s": 0.9,
+  "pyright_wall_s": 6.3,
+  "fork_wall_s": 1.1,
   "divergences": [
     {
       "id": "ROFL-File-Information:patch_compiler/binary_index.py:544:24:reportUnnecessaryIsInstance:extra",

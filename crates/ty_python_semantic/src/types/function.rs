@@ -1163,6 +1163,13 @@ pub(super) fn walk_function_type<'db, V: super::visitor::TypeVisitor<'db> + ?Siz
 
 #[salsa::tracked]
 impl<'db> FunctionType<'db> {
+    /// Fork delta (sightline oracle): a plain single definition — not overloaded,
+    /// no decorator-updated signatures — whose display the inferred-return
+    /// reveal patch may rewrite.
+    pub(crate) fn is_plain_definition(self, db: &'db dyn Db) -> bool {
+        !self.literal(db).overloaded && self.updated_signatures(db).is_none()
+    }
+
     fn updated_signature(self, db: &'db dyn Db) -> Option<&'db CallableSignature<'db>> {
         self.updated_signatures(db)
             .as_deref()
@@ -2971,6 +2978,8 @@ pub(super) fn report_revealed_type<'db>(
     argument_node: impl Ranged,
 ) {
     let db = context.db();
+    // fork delta: unannotated functions reveal their body-inferred return
+    let revealed_type = crate::types::inferred_return::with_inferred_return(db, revealed_type);
     if let Some(builder) = context.report_diagnostic(DiagnosticId::RevealedType, Severity::Info) {
         let env = context.program_environment();
         let mut diag = builder.into_diagnostic("Revealed type");

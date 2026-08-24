@@ -11,7 +11,7 @@
 use std::io::Write;
 
 use anyhow::{Context, Result};
-use ruff_db::diagnostic::{Diagnostic, DiagnosticId, UnifiedFile};
+use ruff_db::diagnostic::{Diagnostic, DiagnosticId, Severity, UnifiedFile};
 use ruff_db::source::{line_index, source_text};
 use ruff_db::system::{OsSystem, SystemPath, SystemPathBuf};
 use ty_project::metadata::options::{EnvironmentOptions, Options, SrcOptions};
@@ -227,7 +227,15 @@ fn main() -> Result<()> {
 }
 
 fn convert(db: &ProjectDatabase, diagnostic: &Diagnostic) -> Option<serde_json::Value> {
-    let rule = pyright_rule(diagnostic.id())?;
+    // Unmapped diagnostics pass through at error severity only: sightline's
+    // counterfactual arbiter (#5/#10) vetoes a proposal on any *new error* in
+    // its caller files after the annotation splice, so type errors such as
+    // `invalid-argument-type` must reach the JSON or vetoes can never fire.
+    let rule = match pyright_rule(diagnostic.id()) {
+        Some(rule) => rule,
+        None if diagnostic.severity() >= Severity::Error => "",
+        None => return None,
+    };
     let annotation = diagnostic.primary_annotation()?;
     let span = annotation.get_span();
     let &UnifiedFile::Ty(file) = span.file() else {
@@ -247,7 +255,15 @@ fn convert(db: &ProjectDatabase, diagnostic: &Diagnostic) -> Option<serde_json::
         })
     };
 
-    let (rule_field, severity, message) = if rule == "reveal" {
+    let passthrough_rule;
+    let (rule_field, severity, message) = if rule.is_empty() {
+        passthrough_rule = diagnostic.id().to_string();
+        (
+            Some(passthrough_rule.as_str()),
+            "error",
+            strip_markup(diagnostic.headline_message()),
+        )
+    } else if rule == "reveal" {
         // pyright: `Type of "<expr>" is "<type>"`. The oracle's regex wildcards the
         // expression, so a placeholder is fine; the type comes from ty's annotation
         // message (a backtick-quoted type), normalized to pyright's display forms.

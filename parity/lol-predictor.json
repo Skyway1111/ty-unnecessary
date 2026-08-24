@@ -17,8 +17,8 @@
       "matched": 11
     }
   },
-  "pyright_wall_s": 8.3,
-  "fork_wall_s": 0.9,
+  "pyright_wall_s": 9.8,
+  "fork_wall_s": 1.0,
   "divergences": [
     {
       "id": "lol-predictor:src/league_predictor/draft_grading/blend.py:737:19:reportUnnecessaryCast:missing",
