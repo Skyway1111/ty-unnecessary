@@ -6,13 +6,13 @@ sides get the identical config the production pipeline uses (which also discharg
 "consumable drop-in" criterion: no oracle change, just ``exe=``).
 
 Diagnostics are compared on ``(rel, line, col, rule, polarity)``. Every non-match must be
-classified in the divergence ledger (``corpus/ty-divergences.toml``) as ``ty-better`` or
+classified in the divergence ledger (``parity/ty-divergences.toml``) as ``ty-better`` or
 ``ty-worse`` with grounding; an unclassified diff fails the run (v1 criterion 3: no silent
 divergence).
 
 Usage:
     python scripts/diff_pyright.py <repo-root> --fork <ty-unnecessary.exe> \
-        [--ledger corpus/ty-divergences.toml] [--receipt corpus/results/ty-parity]
+        [--ledger parity/ty-divergences.toml] [--receipt parity]
 
 The receipt (match rate per rule + full divergence list) is written to
 ``<receipt>/<repo-name>.json`` for committing.

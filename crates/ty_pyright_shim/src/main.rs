@@ -50,7 +50,9 @@ fn parse_args() -> Result<Args> {
                 python_path = Some(iter.next().context("--pythonpath requires a value")?);
             }
             other if other.starts_with("--") => {
-                // Ignore unknown pyright flags for drop-in compatibility.
+                // Boolean pyright flags are ignored for drop-in compatibility. An unknown
+                // *value-taking* flag would misparse (its value lands in `root`); the
+                // oracle's invocation is fixed, so none reach us today.
             }
             other => root = Some(other.to_string()),
         }
@@ -288,48 +290,95 @@ fn convert(db: &ProjectDatabase, diagnostic: &Diagnostic) -> Option<serde_json::
 /// (`<module 'x'>` -> `Module("x")`), and named function signatures
 /// (`def f(x) -> R` -> `(x) -> R`).
 fn normalize_type_display(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
+    // Every rewrite must leave quoted string-literal contents (`Literal["a*b"]`) alone:
+    // this function feeds the parity pipeline, so silent corruption there would show up
+    // as spurious answer mismatches.
+    //
+    // `<module 'x'>` -> `Module("x")`. This runs on the whole string because the module
+    // form carries its own single quotes, which the quote-aware pass below would treat as
+    // a string literal; the full `<module '` prefix is specific enough not to occur
+    // inside real literals. Its `Module("x")` output then reads as a quoted span below,
+    // protecting module names from the star/def surgery.
+    let mut with_modules = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(idx) = rest.find("<module '") {
-        out.push_str(&rest[..idx]);
+        with_modules.push_str(&rest[..idx]);
         let tail = &rest[idx + "<module '".len()..];
         if let Some(end) = tail.find("'>") {
-            out.push_str("Module(\"");
-            out.push_str(&tail[..end]);
-            out.push_str("\")");
+            with_modules.push_str("Module(\"");
+            with_modules.push_str(&tail[..end]);
+            with_modules.push_str("\")");
             rest = &tail[end + 2..];
         } else {
-            out.push_str("<module '");
+            with_modules.push_str("<module '");
             rest = tail;
         }
     }
-    out.push_str(rest);
+    with_modules.push_str(rest);
 
-    // `def name(...)` -> `(...)`; exact-form star markers dropped.
-    let mut result = String::with_capacity(out.len());
-    let bytes = out.as_bytes();
-    let mut skip_until = 0usize;
-    for (i, ch) in out.char_indices() {
-        if i < skip_until {
-            continue;
+    rewrite_outside_quotes(&with_modules, |span, out| {
+        // Exact-form markers (`float*`) dropped; `def name(...)` -> `(...)`.
+        let bytes = span.as_bytes();
+        let mut skip_until = 0usize;
+        for (i, ch) in span.char_indices() {
+            if i < skip_until {
+                continue;
+            }
+            if ch == '*' && i > 0 && bytes[i - 1].is_ascii_alphanumeric() {
+                continue;
+            }
+            if span[i..].starts_with("def ") && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
+            {
+                if let Some(paren) = span[i..].find('(') {
+                    let name = &span[i + 4..i + paren];
+                    if !name.is_empty()
+                        && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    {
+                        skip_until = i + paren;
+                        continue;
+                    }
+                }
+            }
+            out.push(ch);
         }
-        if ch == '*' && i > 0 && bytes[i - 1].is_ascii_alphanumeric() {
-            continue; // float* / complex* exact markers
-        }
-        if out[i..].starts_with("def ")
-            && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
-        {
-            if let Some(paren) = out[i..].find('(') {
-                let name = &out[i + 4..i + paren];
-                if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                    skip_until = i + paren;
-                    continue;
+    })
+}
+
+/// Apply `rewrite` to the spans of `text` outside `"…"`/`'…'` string literals (backslash
+/// escapes respected); quoted spans are copied through verbatim.
+fn rewrite_outside_quotes(text: &str, rewrite: impl Fn(&str, &mut String)) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut span_start = 0usize;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for (i, ch) in text.char_indices() {
+        match quote {
+            Some(q) => {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == q {
+                    quote = None;
+                    out.push_str(&text[span_start..i + ch.len_utf8()]);
+                    span_start = i + ch.len_utf8();
+                }
+            }
+            None => {
+                if ch == '"' || ch == '\'' {
+                    rewrite(&text[span_start..i], &mut out);
+                    span_start = i;
+                    quote = Some(ch);
                 }
             }
         }
-        result.push(ch);
     }
-    result
+    match quote {
+        // Unterminated quote: treat the tail as literal.
+        Some(_) => out.push_str(&text[span_start..]),
+        None => rewrite(&text[span_start..], &mut out),
+    }
+    out
 }
 
 /// ty renders inline code in diagnostic messages with backticks; pyright's messages quote
@@ -337,4 +386,43 @@ fn normalize_type_display(text: &str) -> String {
 /// except for stray backticks from non-ported diagnostics (e.g. `unresolved-import`).
 fn strip_markup(message: &str) -> String {
     message.replace('`', "\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_type_display;
+
+    #[test]
+    fn star_markers_stripped_outside_literals() {
+        assert_eq!(normalize_type_display("float*"), "float");
+        assert_eq!(normalize_type_display("int | float* | complex*"), "int | complex".replace("int | complex", "int | float | complex"));
+    }
+
+    #[test]
+    fn literal_contents_untouched() {
+        assert_eq!(normalize_type_display("Literal[\"a*b\"]"), "Literal[\"a*b\"]");
+        assert_eq!(normalize_type_display("Literal['def f(']"), "Literal['def f(']");
+        assert_eq!(
+            normalize_type_display("Literal[\"x\"] | float*"),
+            "Literal[\"x\"] | float"
+        );
+    }
+
+    #[test]
+    fn module_display_rewritten() {
+        assert_eq!(normalize_type_display("<module 'torch'>"), "Module(\"torch\")");
+        // the rewritten module name is quote-protected from later passes
+        assert_eq!(normalize_type_display("<module 'a*b'>"), "Module(\"a*b\")");
+    }
+
+    #[test]
+    fn def_signatures_lose_their_name() {
+        assert_eq!(normalize_type_display("def call() -> int"), "() -> int");
+        assert_eq!(
+            normalize_type_display("def f(x, y) -> None"),
+            "(x, y) -> None"
+        );
+        // not a definition display: untouched
+        assert_eq!(normalize_type_display("undef (x) -> int"), "undef (x) -> int");
+    }
 }

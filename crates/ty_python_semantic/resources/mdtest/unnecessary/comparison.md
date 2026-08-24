@@ -77,6 +77,29 @@ def _(v: float, n: int, c: complex, b: bool):
     b == 1.0
 ```
 
+## Strict numerics under narrowing
+
+pyright distinguishes a *narrowed* `float` (the strict class an `isinstance` check produces)
+from an *annotated* `float` (the promoted `int | float` form): the strict form does not
+overlap an int literal, the promoted form does. Pinned against basedpyright 1.39.10 with
+out-of-corpus probes; in ty the strict form is what a narrowing projection yields.
+
+```toml
+[rules]
+unnecessary-comparison = "error"
+```
+
+```py
+def narrowed(x) -> None:
+    if isinstance(x, float):
+        x == 0  # error: [unnecessary-comparison]
+        n: int = 1
+        x == n  # error: [unnecessary-comparison]
+
+def annotated(v: float) -> None:
+    v == 0
+```
+
 ## Narrowed `Unknown` stays comparable
 
 pyright has no intersection types: narrowing an `Unknown` value with `!=` leaves it
