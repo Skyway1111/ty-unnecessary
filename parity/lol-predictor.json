@@ -1,6 +1,6 @@
 {
   "repo": "lol-predictor",
-  "fork_exe": "..\\agent-codebase-checker\\.venv\\Scripts\\ty-unnecessary.exe",
+  "fork_exe": "target\\release\\ty-unnecessary.exe",
   "pyright_total": 16,
   "fork_total": 15,
   "matched": 13,
@@ -17,7 +17,7 @@
       "matched": 11
     }
   },
-  "pyright_wall_s": 8.2,
+  "pyright_wall_s": 9.5,
   "fork_wall_s": 1.0,
   "divergences": [
     {

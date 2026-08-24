@@ -1,6 +1,6 @@
 {
   "repo": "merged-calculator",
-  "fork_exe": "..\\agent-codebase-checker\\.venv\\Scripts\\ty-unnecessary.exe",
+  "fork_exe": "target\\release\\ty-unnecessary.exe",
   "pyright_total": 131,
   "fork_total": 132,
   "matched": 130,
@@ -17,7 +17,7 @@
       "matched": 126
     }
   },
-  "pyright_wall_s": 13.6,
+  "pyright_wall_s": 14.2,
   "fork_wall_s": 2.1,
   "divergences": [
     {

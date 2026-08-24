@@ -230,3 +230,64 @@ reveal_type(recursive)  # revealed: (n: int) -> Unknown | Literal[0]
 reveal_type(nested)  # revealed: (x: int) -> list[Unknown]
 reveal_type(through_untyped)  # revealed: (x: int) -> Unknown
 ```
+
+## Decorated functions reveal through identity-typed decorators; `C.m` binds a classmethod
+
+An identity-typed decorator (`Callable[[F], F]`, or a generic `__call__` returning its
+argument - the pytest / Flask shape) specializes the function type without changing its
+signature, so the reveal follows the function through it. A ParamSpec-transparent decorator
+rewrites the function to a `Callable` (identity lost: stock display); a decorator that
+rewrites the return is whatever it returns. A classmethod accessed on its class is a bound
+method: the reveal is the bound signature carrying the inferred return.
+
+```py
+from typing import Callable, ParamSpec, TypeVar
+
+F = TypeVar("F", bound=Callable[..., object])
+P = ParamSpec("P")
+R = TypeVar("R")
+
+def identity(f: F) -> F:
+    return f
+
+class Marker:
+    def __call__(self, f: F) -> F:
+        return f
+
+def transparent(f: Callable[P, R]) -> Callable[P, R]:
+    return f
+
+def rewrites(f: Callable[P, R]) -> Callable[P, list[R]]:
+    raise NotImplementedError
+
+@identity
+def decorated(x: int):
+    return x + 1
+
+@Marker()
+def marked(x: int):
+    return str(x)
+
+@transparent
+def through(x: int):
+    return x
+
+@rewrites
+def rewritten(x: int):
+    return x
+
+class C:
+    @classmethod
+    def make(cls, x: int):
+        return x * 2
+
+    def m(self, x: int):
+        return x
+
+reveal_type(decorated)  # revealed: (x: int) -> int
+reveal_type(marked)  # revealed: (x: int) -> str
+reveal_type(through)  # revealed: (x: int) -> Unknown
+reveal_type(rewritten)  # revealed: (x: int) -> list[Unknown]
+reveal_type(C.make)  # revealed: (x: int) -> int
+reveal_type(C().m)  # revealed: (x: int) -> int
+```

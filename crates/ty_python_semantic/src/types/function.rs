@@ -1163,11 +1163,9 @@ pub(super) fn walk_function_type<'db, V: super::visitor::TypeVisitor<'db> + ?Siz
 
 #[salsa::tracked]
 impl<'db> FunctionType<'db> {
-    /// Fork delta (sightline oracle): a plain single definition — not overloaded,
-    /// no decorator-updated signatures — whose display the inferred-return
-    /// reveal patch may rewrite.
-    pub(crate) fn is_plain_definition(self, db: &'db dyn Db) -> bool {
-        !self.literal(db).overloaded && self.updated_signatures(db).is_none()
+    /// Fork delta (sightline oracle): overloaded functions keep their stock reveal.
+    pub(crate) fn is_overloaded(self, db: &'db dyn Db) -> bool {
+        self.literal(db).overloaded
     }
 
     fn updated_signature(self, db: &'db dyn Db) -> Option<&'db CallableSignature<'db>> {

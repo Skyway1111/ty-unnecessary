@@ -1,6 +1,6 @@
 {
   "repo": "ROFL-File-Information",
-  "fork_exe": "..\\agent-codebase-checker\\.venv\\Scripts\\ty-unnecessary.exe",
+  "fork_exe": "target\\release\\ty-unnecessary.exe",
   "pyright_total": 55,
   "fork_total": 59,
   "matched": 55,
@@ -22,8 +22,8 @@
       "matched": 28
     }
   },
-  "pyright_wall_s": 5.7,
-  "fork_wall_s": 1.0,
+  "pyright_wall_s": 5.9,
+  "fork_wall_s": 1.1,
   "divergences": [
     {
       "id": "ROFL-File-Information:patch_compiler/binary_index.py:544:24:reportUnnecessaryIsInstance:extra",

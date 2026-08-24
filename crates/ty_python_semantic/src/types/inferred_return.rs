@@ -23,9 +23,15 @@
 //! the common shape. Calls nested in other expressions and names bound from calls stay
 //! as inferred.
 //!
-//! Async non-generator, overloaded and signature-updated functions keep their normal
-//! display: their return shape is wrapped (Coroutine) or already author-declared, and
-//! pyright parity for them is out of the oracle's scope.
+//! Decorators: an identity-typed decorator (`Callable[[F], F]`, a generic `__call__`
+//! returning its argument) specializes the function type without changing its signature,
+//! so the reveal follows the function through it; a ParamSpec-transparent decorator
+//! rewrites it to a `Callable` (identity lost: stock display). A bound method (`C.m` for
+//! a classmethod) reveals its bound signature with the inferred return.
+//!
+//! Async non-generator and overloaded functions keep their normal display: their return
+//! shape is wrapped (Coroutine) or already author-declared, and pyright parity for them
+//! is out of the oracle's scope.
 
 use ruff_db::parsed::parsed_module;
 use ruff_python_ast as ast;
@@ -53,23 +59,31 @@ pub fn revealed_display<'db>(
         .to_string()
 }
 
-/// The revealed form of `ty`: unannotated plain functions get their inferred return.
+/// The revealed form of `ty`: a return-unannotated function - plain, identity-decorated,
+/// or bound (`C.m`) - as a callable carrying its inferred return.
 pub(crate) fn with_inferred_return<'db>(db: &'db dyn Db, ty: Type<'db>) -> Type<'db> {
-    let Type::FunctionLiteral(function) = ty else {
-        return ty;
+    let (function, bound) = match ty {
+        Type::FunctionLiteral(function) => (function, None),
+        Type::BoundMethod(method) => (method.function(db), Some(method)),
+        _ => return ty,
     };
     let mut visiting = vec![function];
-    match inferred_return(db, function, &mut visiting) {
-        Some(inferred) => Type::Callable(CallableType::single(
-            db,
-            function
-                .literal(db)
-                .last_definition
-                .signature(db)
-                .with_return_type(inferred),
-        )),
-        None => ty,
-    }
+    let Some(inferred) = inferred_return(db, function, &mut visiting) else {
+        return ty;
+    };
+    let signature = match bound {
+        // the receiver-bound signature; a non-overloaded function has exactly one
+        Some(method) => {
+            let callable = method.into_callable_type(db);
+            let [signature] = callable.signatures(db).overloads.as_slice() else {
+                return ty;
+            };
+            signature.clone()
+        }
+        // decorator-updated signatures respected (identity decorators specialize)
+        None => function.last_definition_signature(db).clone(),
+    };
+    Type::Callable(CallableType::single(db, signature.with_return_type(inferred)))
 }
 
 /// Call chains deeper than this keep the call's own (`Unknown`) type.
@@ -83,7 +97,7 @@ fn inferred_return<'db>(
     function: FunctionType<'db>,
     visiting: &mut Vec<FunctionType<'db>>,
 ) -> Option<Type<'db>> {
-    if !function.is_plain_definition(db) {
+    if function.is_overloaded(db) {
         return None;
     }
     let overload = function.literal(db).last_definition;

@@ -117,6 +117,11 @@ def make_legacy_oracle_class():
                 line_spans.sort()
             return key_by_pos, spans
 
+        def call_edges(self):
+            # no edge dump on the comparator side: its call graph stays CHA-only
+            # (and the supplier, which reads the graph, must not re-enter the pass)
+            return []
+
         def _ensure_pass(self, queries=None):
             if self._diags is not None:
                 return
@@ -216,7 +221,19 @@ def run_collect(root: Path, exe_override: Path | None):
     finally:
         oracle_module.default_exe = original
         oracle_module.Oracle = original_cls
-    answers = dict(getattr(provers.oracle, "_answers", {})) if provers.oracle else {}
+    # keyed by query content, not id: span-query ids are enumerated over each
+    # side's caller table (the fork side reads the oracle-upgraded graph), so
+    # ids no longer align across sides
+    answers = {}
+    if provers.oracle is not None and provers.oracle.query_supplier:
+        raw = getattr(provers.oracle, "_answers", {})
+        for q in provers.oracle.query_supplier():
+            if q.id in raw:
+                key = (
+                    f"{q.rel}::{q.expr}" if q.expr is not None
+                    else f"{q.rel}:{q.line}:{q.col_start}-{q.col_end}"
+                )
+                answers[key] = raw[q.id]
     by_rule = Counter(f.rule for f in kept)
     return answers, by_rule, list(provers.notes)
 
