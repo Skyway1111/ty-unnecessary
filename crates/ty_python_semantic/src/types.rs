@@ -38,6 +38,7 @@ pub(crate) use self::infer::{
     infer_definition_types, infer_expression_type, infer_expression_types,
     infer_same_file_expression_type, infer_scope_types, is_discarded_dict_key_assignment,
 };
+pub use self::inferred_return::revealed_display;
 pub(crate) use self::iteration::extract_fixed_length_iterable_element_types;
 pub use self::known_instance::KnownInstanceType;
 pub(crate) use self::match_pattern::{

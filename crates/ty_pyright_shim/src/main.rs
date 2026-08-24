@@ -8,6 +8,8 @@
 //! `unresolved-import`), and `reveal_type` answers reformatted to pyright's
 //! `Type of "..." is "..."` message shape.
 
+mod batch;
+
 use std::io::Write;
 
 use anyhow::{Context, Result};
@@ -24,6 +26,7 @@ struct Args {
     threads: usize,
     project_config: Option<String>,
     python_path: Option<String>,
+    batch: Option<String>,
     root: String,
 }
 
@@ -31,6 +34,7 @@ fn parse_args() -> Result<Args> {
     let mut threads = 4usize;
     let mut project_config = None;
     let mut python_path = None;
+    let mut batch = None;
     let mut root = None;
     let mut iter = std::env::args().skip(1);
     while let Some(arg) = iter.next() {
@@ -49,6 +53,9 @@ fn parse_args() -> Result<Args> {
             "--pythonpath" => {
                 python_path = Some(iter.next().context("--pythonpath requires a value")?);
             }
+            "--batch" => {
+                batch = Some(iter.next().context("--batch requires a value")?);
+            }
             other if other.starts_with("--") => {
                 // Boolean pyright flags are ignored for drop-in compatibility. An unknown
                 // *value-taking* flag would misparse (its value lands in `root`); the
@@ -61,6 +68,7 @@ fn parse_args() -> Result<Args> {
         threads,
         project_config,
         python_path,
+        batch,
         root: root.context("missing root path argument")?,
     })
 }
@@ -199,6 +207,13 @@ fn main() -> Result<()> {
 
     let mut db = ProjectDatabase::fallible(metadata, system)?;
     ruff_db::disable_lru(&mut db);
+
+    if let Some(request_path) = &args.batch {
+        // batch mode mutates source-text overrides (expr appends, world
+        // overlays), which a frozen db panics on — never freeze here
+        return batch::run(&mut db, &root, request_path);
+    }
+
     db.freeze_open_files();
     db.freeze();
 
@@ -226,7 +241,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn convert(db: &ProjectDatabase, diagnostic: &Diagnostic) -> Option<serde_json::Value> {
+pub(crate) fn convert(db: &ProjectDatabase, diagnostic: &Diagnostic) -> Option<serde_json::Value> {
     // Unmapped diagnostics pass through at error severity only: sightline's
     // counterfactual arbiter (#5/#10) vetoes a proposal on any *new error* in
     // its caller files after the annotation splice, so type errors such as
@@ -305,7 +320,7 @@ fn convert(db: &ProjectDatabase, diagnostic: &Diagnostic) -> Option<serde_json::
 /// pyright's forms: exact-form markers (`float*` -> `float`), module literals
 /// (`<module 'x'>` -> `Module("x")`), and named function signatures
 /// (`def f(x) -> R` -> `(x) -> R`).
-fn normalize_type_display(text: &str) -> String {
+pub(crate) fn normalize_type_display(text: &str) -> String {
     // Every rewrite must leave quoted string-literal contents (`Literal["a*b"]`) alone:
     // this function feeds the parity pipeline, so silent corruption there would show up
     // as spurious answer mismatches.

@@ -31,6 +31,19 @@ use crate::reachability::evaluate_reachability_constraint;
 use crate::types::infer::{ScopeInference, infer_complete_scope_types};
 use crate::types::{CallableType, KnownClass, ProgramEnvironment, Type, UnionBuilder};
 
+/// Shim-facing (batch protocol): the string `report_revealed_type` would print for
+/// `ty` — the inferred-return patch plus ty's display, long unions preserved.
+pub fn revealed_display<'db>(
+    db: &'db dyn Db,
+    ty: Type<'db>,
+    env: &ProgramEnvironment<'db>,
+) -> String {
+    with_inferred_return(db, ty)
+        .display(db, env)
+        .preserve_long_unions()
+        .to_string()
+}
+
 /// The revealed form of `ty`: unannotated plain functions get their inferred return.
 pub(crate) fn with_inferred_return<'db>(db: &'db dyn Db, ty: Type<'db>) -> Type<'db> {
     let Type::FunctionLiteral(function) = ty else {

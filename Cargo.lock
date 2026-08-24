@@ -4840,10 +4840,17 @@ dependencies = [
  "anyhow",
  "rayon",
  "ruff_db",
+ "ruff_diagnostics",
+ "ruff_python_ast",
  "ruff_ranged_value",
  "ruff_source_file",
+ "ruff_text_size",
+ "salsa",
+ "serde",
  "serde_json",
+ "tempfile",
  "ty_project",
+ "ty_python_core",
  "ty_python_semantic",
 ]
 
