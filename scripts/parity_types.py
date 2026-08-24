@@ -51,21 +51,167 @@ def basedpyright_exe() -> Path:
     return Path(found)
 
 
+def make_legacy_oracle_class():
+    """The reveal-injection transport, harness-local: sightline's oracle now
+    speaks the fork's batch protocol, which basedpyright cannot. This subclass
+    restores the shadow-tree transport (wrap/EOF-append reveals, column
+    back-mapping, worlds as full shadow re-checks) so the comparator side of
+    this harness keeps running. It lives here because this harness is its only
+    consumer (batch-protocol plan ruling)."""
+    import re
+    import tempfile
+
+    from sightline.provers.oracle import Oracle, OracleDiag
+
+    _REVEAL_RE = re.compile(r'Type of "(?s:.*)" is "(.*)"$')
+    _PREFIX = len("reveal_type(")
+
+    def _original_col(spans, col):
+        acc = 0
+        for s, e in spans:
+            if col < s + acc:
+                break
+            if col < s + acc + _PREFIX:
+                return s
+            if col < e + acc + _PREFIX:
+                return col - acc - _PREFIX
+            acc += _PREFIX + 1
+        return col - acc
+
+    class LegacyOracle(Oracle):
+        def _inject(self, shadow, queries):
+            by_file = {}
+            for q in queries:
+                by_file.setdefault(q.rel, []).append(q)
+            key_by_pos, spans = {}, {}
+            for rel, file_queries in by_file.items():
+                path = shadow / rel
+                if not path.exists():
+                    continue
+                lines = path.read_text(encoding="utf-8").splitlines()
+                wraps = [q for q in file_queries if q.expr is None]
+                for q in sorted(wraps, key=lambda x: (x.line, -x.col_start)):
+                    if q.line - 1 >= len(lines):
+                        continue
+                    ln = lines[q.line - 1]
+                    if q.col_end > len(ln):
+                        continue
+                    lines[q.line - 1] = (
+                        ln[: q.col_start] + "reveal_type("
+                        + ln[q.col_start : q.col_end] + ")" + ln[q.col_end :]
+                    )
+                    key_by_pos[(rel, q.line)] = q.id
+                    spans.setdefault((rel, q.line), []).append(
+                        (q.col_start, q.col_end)
+                    )
+                for q in file_queries:
+                    if q.expr is not None:
+                        lines.append(f"reveal_type({q.expr})")
+                        key_by_pos[(rel, len(lines))] = q.id
+                path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            for line_spans in spans.values():
+                line_spans.sort()
+            return key_by_pos, spans
+
+        def _ensure_pass(self, queries=None):
+            if self._diags is not None:
+                return
+            if queries is None:
+                queries = list(self.query_supplier()) if self.query_supplier else []
+            if not queries:
+                self._diags = self._run(self.root)
+                return
+            with tempfile.TemporaryDirectory(prefix="sightline-shadow-") as td:
+                shadow = Path(td) / "tree"
+                self.make_shadow(shadow)
+                key_by_pos, spans = self._inject(shadow, queries)
+                raw = self._run(shadow, label="diagnostics+types")
+            self._attempted_ids = {q.id for q in queries}
+            diags = []
+            for d in raw:
+                m = _REVEAL_RE.match(d.message)
+                if m:
+                    qid = key_by_pos.get((d.rel, d.line))
+                    if qid is not None:
+                        self._answers[qid] = m.group(1)
+                    continue
+                line_spans = spans.get((d.rel, d.line))
+                if line_spans:
+                    d = OracleDiag(
+                        rel=d.rel, line=d.line,
+                        col=_original_col(line_spans, d.col),
+                        rule=d.rule, message=d.message, severity=d.severity,
+                    )
+                diags.append(d)
+            self._diags = diags
+
+        def established_types(self, queries):
+            if not queries:
+                return {}
+            if self._diags is None:
+                self._ensure_pass(queries)
+            if {q.id for q in queries} <= self._attempted_ids:
+                return {
+                    q.id: self._answers[q.id]
+                    for q in queries
+                    if q.id in self._answers
+                }
+            with tempfile.TemporaryDirectory(prefix="sightline-shadow-") as td:
+                shadow = Path(td) / "tree"
+                self.make_shadow(shadow)
+                key_by_pos, _spans = self._inject(shadow, queries)
+                out = {}
+                for d in self._run(shadow, label="types"):
+                    m = _REVEAL_RE.match(d.message)
+                    if m:
+                        qid = key_by_pos.get((d.rel, d.line))
+                        if qid is not None:
+                            out[qid] = m.group(1)
+                return out
+
+        def verify_worlds(self, worlds):
+            base = {(d.rel, d.line, d.rule) for d in self.diagnostics()}
+            out = {}
+            for wid, files in worlds:
+                with tempfile.TemporaryDirectory(prefix="sightline-cf-") as td:
+                    shadow = Path(td) / "tree"
+                    self.make_shadow(shadow)
+                    for rel, content in files.items():
+                        target = shadow / rel
+                        if target.exists():
+                            target.write_text(content, encoding="utf-8")
+                    diags = self._run(shadow, label=f"world {wid}")
+                out[wid] = [
+                    d for d in diags
+                    if (d.rel, d.line, d.rule) not in base
+                    and not _REVEAL_RE.match(d.message)
+                ]
+            return out
+
+    return LegacyOracle
+
+
 def run_collect(root: Path, exe_override: Path | None):
     """One full sightline collect; returns (answers, findings_by_rule, notes).
-    exe_override None = the basedpyright comparator side."""
+    exe_override None = the basedpyright comparator side (legacy transport)."""
     import sightline.provers.oracle as oracle_module
     from sightline.config import load_config
     from sightline.gate import collect
 
     original = oracle_module.default_exe
-    exe = exe_override if exe_override is not None else basedpyright_exe()
+    original_cls = oracle_module.Oracle
+    if exe_override is not None:
+        exe = exe_override
+    else:
+        exe = basedpyright_exe()
+        oracle_module.Oracle = make_legacy_oracle_class()
     oracle_module.default_exe = lambda: exe
     try:
         config = load_config(root)
         facts, provers, kept, _suppressed, metrics = collect(root, config)
     finally:
         oracle_module.default_exe = original
+        oracle_module.Oracle = original_cls
     answers = dict(getattr(provers.oracle, "_answers", {})) if provers.oracle else {}
     by_rule = Counter(f.rule for f in kept)
     return answers, by_rule, list(provers.notes)

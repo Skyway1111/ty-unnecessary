@@ -124,7 +124,11 @@ def run_side(
 ) -> tuple[list[OracleDiag], float]:
     started = time.monotonic()
     oracle = Oracle(root, excludes=excludes, python_exe=python_exe, exe=exe)
-    diags = oracle.unnecessary()
+    # pyright-CLI mode explicitly: sightline's default path is the fork-only
+    # batch protocol, and this harness runs both checkers
+    from sightline.provers.oracle import UNNECESSARY_RULES
+
+    diags = [d for d in oracle._run(root) if d.rule in UNNECESSARY_RULES]
     wall = time.monotonic() - started
     print(f"  {label}: {len(diags)} reportUnnecessary* diagnostics in {wall:.1f}s")
     return diags, wall
