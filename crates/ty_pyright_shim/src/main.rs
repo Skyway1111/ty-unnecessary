@@ -27,6 +27,7 @@ struct Args {
     project_config: Option<String>,
     python_path: Option<String>,
     batch: Option<String>,
+    serve: bool,
     root: String,
 }
 
@@ -35,6 +36,7 @@ fn parse_args() -> Result<Args> {
     let mut project_config = None;
     let mut python_path = None;
     let mut batch = None;
+    let mut serve = false;
     let mut root = None;
     let mut iter = std::env::args().skip(1);
     while let Some(arg) = iter.next() {
@@ -56,6 +58,7 @@ fn parse_args() -> Result<Args> {
             "--batch" => {
                 batch = Some(iter.next().context("--batch requires a value")?);
             }
+            "--serve" => serve = true,
             other if other.starts_with("--") => {
                 // Boolean pyright flags are ignored for drop-in compatibility. An unknown
                 // *value-taking* flag would misparse (its value lands in `root`); the
@@ -69,6 +72,7 @@ fn parse_args() -> Result<Args> {
         project_config,
         python_path,
         batch,
+        serve,
         root: root.context("missing root path argument")?,
     })
 }
@@ -216,6 +220,11 @@ fn main() -> Result<()> {
     let mut db = ProjectDatabase::fallible(metadata, system)?;
     ruff_db::disable_lru(&mut db);
 
+    if args.serve {
+        // one warm db serves every request (sightline v5.2): the batch mode's
+        // three redundant cold checks per audit go
+        return batch::serve(&mut db, &root);
+    }
     if let Some(request_path) = &args.batch {
         // batch mode mutates source-text overrides (expr appends, world
         // overlays), which a frozen db panics on — never freeze here

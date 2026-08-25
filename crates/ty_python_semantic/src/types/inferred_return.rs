@@ -25,9 +25,12 @@
 //!
 //! Decorators: an identity-typed decorator (`Callable[[F], F]`, a generic `__call__`
 //! returning its argument) specializes the function type without changing its signature,
-//! so the reveal follows the function through it; a ParamSpec-transparent decorator
-//! rewrites it to a `Callable` (identity lost: stock display). A bound method (`C.m` for
-//! a classmethod) reveals its bound signature with the inferred return.
+//! so the reveal follows the function through it. A ParamSpec-transparent decorator
+//! rewrites it to a `Callable`, but the signature bound from the function keeps the
+//! function's definition and a stock `Unknown` return: that pair is the provenance the
+//! reveal follows back to the undecorated function. A bound method (`C.m` for a
+//! classmethod) reveals its bound signature with the inferred return; a property accessed
+//! on its class (`C.attr`, the descriptor) reveals its getter the same way.
 //!
 //! Async non-generator and overloaded functions keep their normal display: their return
 //! shape is wrapped (Coroutine) or already author-declared, and pyright parity for them
@@ -42,8 +45,10 @@ use ty_python_core::{FileScopeId, SemanticIndex, semantic_index};
 use crate::Db;
 use crate::reachability::evaluate_reachability_constraint;
 use crate::types::infer::{ScopeInference, infer_complete_scope_types};
+use crate::types::signatures::Signature;
 use crate::types::{
     CallableType, FunctionType, KnownClass, ProgramEnvironment, Type, UnionBuilder,
+    binding_type, infer_definition_types,
 };
 
 /// Shim-facing (batch protocol): the string `report_revealed_type` would print for
@@ -60,30 +65,60 @@ pub fn revealed_display<'db>(
 }
 
 /// The revealed form of `ty`: a return-unannotated function - plain, identity-decorated,
-/// or bound (`C.m`) - as a callable carrying its inferred return.
+/// ParamSpec-forwarded, bound (`C.m`), or a property's getter (`C.attr`) - as a callable
+/// carrying its inferred return.
 pub(crate) fn with_inferred_return<'db>(db: &'db dyn Db, ty: Type<'db>) -> Type<'db> {
-    let (function, bound) = match ty {
-        Type::FunctionLiteral(function) => (function, None),
-        Type::BoundMethod(method) => (method.function(db), Some(method)),
-        _ => return ty,
+    let Some((function, signature)) = revealable(db, ty) else {
+        return ty;
     };
     let mut visiting = vec![function];
     let Some(inferred) = inferred_return(db, function, &mut visiting) else {
         return ty;
     };
-    let signature = match bound {
+    Type::Callable(CallableType::single(db, signature.with_return_type(inferred)))
+}
+
+/// The source function behind a revealable type, with the signature the reveal shows.
+fn revealable<'db>(db: &'db dyn Db, ty: Type<'db>) -> Option<(FunctionType<'db>, Signature<'db>)> {
+    match ty {
+        // decorator-updated signatures respected (identity decorators specialize)
+        Type::FunctionLiteral(function) => {
+            Some((function, function.last_definition_signature(db).clone()))
+        }
         // the receiver-bound signature; a non-overloaded function has exactly one
-        Some(method) => {
+        Type::BoundMethod(method) => {
             let callable = method.into_callable_type(db);
             let [signature] = callable.signatures(db).overloads.as_slice() else {
-                return ty;
+                return None;
             };
-            signature.clone()
+            Some((method.function(db), signature.clone()))
         }
-        // decorator-updated signatures respected (identity decorators specialize)
-        None => function.last_definition_signature(db).clone(),
-    };
-    Type::Callable(CallableType::single(db, signature.with_return_type(inferred)))
+        // the descriptor itself: pyright shows `property`; the oracle's consumer reads
+        // the getter's arrow
+        Type::PropertyInstance(property) => match property.getter(db)? {
+            Type::FunctionLiteral(getter) => {
+                Some((getter, getter.last_definition_signature(db).clone()))
+            }
+            _ => None,
+        },
+        // a `Callable[P, R]` bound from an unannotated function keeps the function's
+        // definition; a return still `Unknown` means R was forwarded from it unchanged
+        // (a decorator rewriting the return leaves anything but stock `Unknown`)
+        Type::Callable(callable) => {
+            let [signature] = callable.signatures(db).overloads.as_slice() else {
+                return None;
+            };
+            if !signature.return_ty.is_unknown() {
+                return None;
+            }
+            let definition = signature.definition?;
+            let undecorated = infer_definition_types(db, definition)
+                .undecorated_type()
+                .unwrap_or_else(|| binding_type(db, definition));
+            Some((undecorated.as_function_literal()?, signature.clone()))
+        }
+        _ => None,
+    }
 }
 
 /// Call chains deeper than this keep the call's own (`Unknown`) type.

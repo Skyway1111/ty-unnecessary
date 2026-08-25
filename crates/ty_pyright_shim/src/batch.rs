@@ -31,6 +31,10 @@
 //! methods' functions, classes for constructor calls; unions all-or-nothing) —
 //! which override a call reaches at runtime is sightline's judgement.
 //!
+//! `--serve`: the same protocol, one request per stdin line and one response
+//! line each, on one warm db — a request's source overrides are undone before
+//! the next, an error ends the process (never a dirty db). EOF exits.
+//!
 //! Span queries resolve natively (covering node at the exact range, real
 //! inference — no source mutation). Expr queries append `reveal_type(<expr>)`
 //! lines in memory via source-text overrides, exercising the very
@@ -42,7 +46,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
-use std::io::Write as _;
+use std::io::{BufRead as _, Write as _};
 
 use anyhow::{Context, Result, anyhow};
 use ruff_db::diagnostic::{Diagnostic, DiagnosticId};
@@ -112,8 +116,38 @@ pub(crate) fn run(db: &mut ProjectDatabase, root: &SystemPath, request_path: &st
         .with_context(|| format!("failed to read batch request `{request_path}`"))?;
     let request: Request =
         serde_json::from_str(&text).context("batch request is not valid JSON")?;
+    let output = handle(db, root, &request)?;
+    let mut stdout = std::io::stdout().lock();
+    serde_json::to_writer(&mut stdout, &output)?;
+    stdout.write_all(b"\n")?;
+    Ok(())
+}
 
+pub(crate) fn serve(db: &mut ProjectDatabase, root: &SystemPath) -> Result<()> {
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout().lock();
+    for line in stdin.lock().lines() {
+        let line = line.context("failed to read a serve request")?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let request: Request =
+            serde_json::from_str(&line).context("serve request is not valid JSON")?;
+        let output = handle(db, root, &request)?;
+        serde_json::to_writer(&mut stdout, &output)?;
+        stdout.write_all(b"\n")?;
+        stdout.flush()?;
+    }
+    Ok(())
+}
+
+fn handle(
+    db: &mut ProjectDatabase,
+    root: &SystemPath,
+    request: &Request,
+) -> Result<serde_json::Value> {
     // -- expr queries: append reveal_type lines in memory, before the base check
+    let mut restore_appends: Vec<(File, Option<ruff_db::source::SourceText>)> = Vec::new();
     let mut appends_by_file: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     for q in &request.queries {
         if let Some(expr) = &q.expr {
@@ -126,6 +160,7 @@ pub(crate) fn run(db: &mut ProjectDatabase, root: &SystemPath, request_path: &st
     let mut reveal_ids: HashMap<(File, usize), String> = HashMap::new();
     for (rel, entries) in &appends_by_file {
         let file = resolve(db, root, rel)?;
+        restore_appends.push((file, file.source_text_override(db).clone()));
         let base = source_text(db, file);
         let mut content = base.as_str().to_string();
         if !content.is_empty() && !content.ends_with('\n') {
@@ -216,17 +251,17 @@ pub(crate) fn run(db: &mut ProjectDatabase, root: &SystemPath, request_path: &st
         }));
     }
 
-    let output = serde_json::json!({
+    for (file, prior) in restore_appends {
+        file.set_source_text_override(db).to(prior);
+    }
+
+    Ok(serde_json::json!({
         "version": "1.1.412-ty-unnecessary-batch",
         "diagnostics": diagnostics,
         "answers": answers,
         "worlds": world_results,
         "call_edges": edges,
-    });
-    let mut stdout = std::io::stdout().lock();
-    serde_json::to_writer(&mut stdout, &output)?;
-    stdout.write_all(b"\n")?;
-    Ok(())
+    }))
 }
 
 /// `(file, one-based line, normalized type text)` when `diagnostic` is a

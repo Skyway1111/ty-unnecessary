@@ -3,8 +3,9 @@
 //! signal) and one clean — verifying world isolation (override reset between
 //! worlds) and determinism (two runs byte-identical).
 
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const MAIN_PY: &str = "\
 def helper(q: str):
@@ -251,4 +252,52 @@ fn call_edges_report_definitions() {
     assert!(ok);
     let response: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(response["call_edges"].as_array().unwrap().len(), 0);
+}
+
+/// `--serve` answers every request on one warm db exactly like a fresh
+/// `--batch` process would: expr appends and world overlays are undone
+/// between requests (sightline v5.2: the four passes share one process).
+#[test]
+fn serve_answers_each_request_like_a_fresh_batch() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("m.py"), MAIN_PY).unwrap();
+    let full = serde_json::json!({
+        "queries": [
+            {"id": "span0", "file": "m.py", "line": 5, "col_start": 18, "col_end": 23},
+            {"id": "expr0", "file": "m.py", "expr": "helper"},
+        ],
+        "worlds": [
+            {"id": "breaking", "overlays": [{"file": "m.py", "content": BREAKING_OVERLAY}]},
+        ],
+        "call_edges": true,
+    });
+    let diagnostics_only = serde_json::json!({"call_edges": true});
+    let requests = [&full, &diagnostics_only, &full, &diagnostics_only];
+    let expected: Vec<String> = requests
+        .iter()
+        .map(|request| {
+            let (stdout, ok) = run_batch(root, request);
+            assert!(ok, "batch run failed: {stdout}");
+            stdout
+        })
+        .collect();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ty-unnecessary"))
+        .arg("--serve")
+        .arg(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("failed to start ty-unnecessary --serve");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    for (request, want) in requests.iter().zip(&expected) {
+        writeln!(stdin, "{}", serde_json::to_string(request).unwrap()).unwrap();
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        assert_eq!(&line, want, "a served response must equal the fresh-batch one");
+    }
+    drop(stdin);
+    assert!(child.wait().unwrap().success(), "EOF must end the server cleanly");
 }

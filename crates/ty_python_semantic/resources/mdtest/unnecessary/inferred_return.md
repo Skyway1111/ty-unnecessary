@@ -236,9 +236,11 @@ reveal_type(through_untyped)  # revealed: (x: int) -> Unknown
 An identity-typed decorator (`Callable[[F], F]`, or a generic `__call__` returning its
 argument - the pytest / Flask shape) specializes the function type without changing its
 signature, so the reveal follows the function through it. A ParamSpec-transparent decorator
-rewrites the function to a `Callable` (identity lost: stock display); a decorator that
-rewrites the return is whatever it returns. A classmethod accessed on its class is a bound
-method: the reveal is the bound signature carrying the inferred return.
+rewrites the function to a `Callable[P, R]`, but the signature bound from the function keeps
+the function's definition and its stock `Unknown` return - the provenance the reveal follows
+back to the undecorated function; a decorator that rewrites the return is whatever it
+returns. A classmethod accessed on its class is a bound method: the reveal is the bound
+signature carrying the inferred return.
 
 ```py
 from typing import Callable, ParamSpec, TypeVar
@@ -286,8 +288,70 @@ class C:
 
 reveal_type(decorated)  # revealed: (x: int) -> int
 reveal_type(marked)  # revealed: (x: int) -> str
-reveal_type(through)  # revealed: (x: int) -> Unknown
+reveal_type(through)  # revealed: (x: int) -> int
 reveal_type(rewritten)  # revealed: (x: int) -> list[Unknown]
 reveal_type(C.make)  # revealed: (x: int) -> int
 reveal_type(C().m)  # revealed: (x: int) -> int
+```
+
+## Property getters and ParamSpec-forwarded functions reveal their source
+
+`C.attr` on a property is the descriptor (ty and pyright both show `property`); the reveal
+follows it to the getter, as an arrow carrying the getter's inferred return - an annotated
+getter keeps the stock display, like an annotated function. A `Callable[P, R]` bound from an
+unannotated function keeps the function's definition in its signature; a return still
+`Unknown` is R forwarded unchanged. A prefixed signature (`Concatenate`) and a callable a
+decorator *factory* builds carry no definition: stock display, never a guess.
+
+```py
+from json import loads
+from typing import Callable, Concatenate, ParamSpec, TypeVar
+
+P = ParamSpec("P")
+R = TypeVar("R")
+T = TypeVar("T")
+
+class C:
+    def __init__(self) -> None:
+        self.count = 3
+
+    @property
+    def size(self):
+        return self.count
+
+    @property
+    def payload(self):
+        return loads("x")
+
+    @property
+    def annotated(self) -> str:
+        return "s"
+
+def prefixed(f: Callable[P, R]) -> Callable[Concatenate[str, P], R]:
+    raise NotImplementedError
+
+def with_default(default: T) -> Callable[[Callable[P, object]], Callable[P, T]]:
+    raise NotImplementedError
+
+def untyped(x):
+    return x
+
+@prefixed
+def tagged(x: int):
+    return x + 1
+
+@with_default(untyped(1))
+def defaulted(x: int):
+    return "s"
+
+@with_default(loads("x"))
+def any_defaulted(x: int):
+    return "s"
+
+reveal_type(C.size)  # revealed: (self) -> int
+reveal_type(C.payload)  # revealed: (self) -> Any
+reveal_type(C.annotated)  # revealed: property
+reveal_type(tagged)  # revealed: (str, /, x: int) -> Unknown
+reveal_type(defaulted)  # revealed: (x: int) -> Unknown
+reveal_type(any_defaulted)  # revealed: (x: int) -> Any
 ```
