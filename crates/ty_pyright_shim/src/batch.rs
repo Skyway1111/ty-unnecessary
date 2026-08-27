@@ -44,9 +44,10 @@
 //!
 //! Span queries resolve natively (covering node at the exact range, real
 //! inference — no source mutation). Expr queries append `reveal_type(<expr>)`
-//! lines in memory via source-text overrides, exercising the very
-//! `report_revealed_type` path the old transport used; the resulting
-//! `RevealedType` artifacts never reach `diagnostics`. Worlds apply full-file
+//! lines in memory via source-text overrides and type the appended argument
+//! natively — both kinds answer through `revealed_display` (inferred returns,
+//! `Self@<class>`); the `RevealedType` artifacts never reach `diagnostics`.
+//! Worlds apply full-file
 //! overlays sequentially on the same salsa db — an incremental re-check — and
 //! report the diagnostics added relative to the base check, by
 //! `(file, line, rule)` identity (sightline's counterfactual baseline key).
@@ -56,7 +57,7 @@ use std::fmt::Write as _;
 use std::io::{BufRead as _, Write as _};
 
 use anyhow::{Context, Result, anyhow};
-use ruff_db::diagnostic::{Diagnostic, DiagnosticId};
+use ruff_db::diagnostic::DiagnosticId;
 use ruff_db::files::{File, system_path_to_file};
 use ruff_db::parsed::parsed_module;
 use ruff_db::source::{line_index, source_text};
@@ -183,15 +184,12 @@ fn handle(
         file.set_source_text_override(db).to(Some(overridden));
     }
 
-    // -- base check: diagnostics + reveal answers
+    // -- base check: diagnostics
     let mut answers: BTreeMap<String, String> = BTreeMap::new();
     let mut diagnostics = Vec::new();
     let mut base_keys: HashSet<(String, u64, String)> = HashSet::new();
     for diagnostic in &db.check() {
-        if let Some((file, line, type_text)) = reveal_answer(db, diagnostic) {
-            if let Some(id) = reveal_ids.get(&(file, line)) {
-                answers.insert(id.clone(), type_text);
-            }
+        if diagnostic.id() == DiagnosticId::RevealedType {
             continue; // transport artifact (ours or user-authored reveal_type)
         }
         if let Some(entry) = convert(db, diagnostic) {
@@ -199,6 +197,13 @@ fn handle(
                 base_keys.insert(key);
             }
             diagnostics.push(entry);
+        }
+    }
+
+    // -- expr queries: the appended argument, typed natively
+    for ((file, line), id) in &reveal_ids {
+        if let Some(type_text) = appended_expr_type(db, *file, *line) {
+            answers.insert(id.clone(), type_text);
         }
     }
 
@@ -271,23 +276,29 @@ fn handle(
     }))
 }
 
-/// `(file, one-based line, normalized type text)` when `diagnostic` is a
-/// `RevealedType` artifact.
-fn reveal_answer(db: &ProjectDatabase, diagnostic: &Diagnostic) -> Option<(File, usize, String)> {
-    if diagnostic.id() != DiagnosticId::RevealedType {
-        return None;
-    }
-    let annotation = diagnostic.primary_annotation()?;
-    let span = annotation.get_span();
-    let ruff_db::diagnostic::UnifiedFile::Ty(file) = span.file() else {
+/// The type of the expression the appended `reveal_type(<expr>)` statement on
+/// `line` (1-based, module level) wraps, displayed as a span query would be.
+fn appended_expr_type(db: &ProjectDatabase, file: File, line: usize) -> Option<String> {
+    let program_file = db.program_file(file);
+    let parsed = parsed_module(db, program_file.python_file(db)).load(db);
+    let source = source_text(db, file);
+    let index = line_index(db, file);
+    let line_start = index.line_start(ruff_source_file::OneIndexed::new(line)?, &source);
+    let ast::Stmt::Expr(stmt) = parsed
+        .syntax()
+        .body
+        .iter()
+        .find(|stmt| stmt.range().start() == line_start)?
+    else {
         return None;
     };
-    let range = span.range()?;
-    let source = source_text(db, *file);
-    let index = line_index(db, *file);
-    let line = index.line_column(range.start(), &source).line.get();
-    let type_text = crate::normalize_type_display(annotation.get_message()?.trim_matches('`'));
-    Some((*file, line, type_text))
+    let ast::Expr::Call(call) = &*stmt.value else {
+        return None;
+    };
+    let model = SemanticModel::new(db, program_file);
+    let ty = call.arguments.args.first()?.inferred_type(&model)?;
+    let display = revealed_display(db, ty, &model.program_environment());
+    Some(crate::normalize_type_display(&display))
 }
 
 /// Native `(file, span) -> type`: the expression whose range is exactly the

@@ -29,7 +29,7 @@ use crate::types::signatures::{
     CallableSignature, Parameter, Parameters, ParametersKind, Signature,
 };
 use crate::types::tuple::{TupleSpec, VariableSegment};
-use crate::types::typevar::BoundTypeVarIdentity;
+use crate::types::typevar::{BoundTypeVarIdentity, TypeVarKind};
 use crate::types::visitor::TypeVisitor;
 use crate::types::{
     CallableType, IntersectionType, KnownBoundMethodType, KnownClass, KnownInstanceType,
@@ -142,6 +142,9 @@ pub struct DisplaySettings<'db> {
     /// Whether to hide the return type of the outermost signature.
     /// Return types of nested callable types inside parameters are still shown.
     hide_return_type: bool,
+    /// Fork delta (sightline oracle): name a `Self` type variable after the class it
+    /// stands for (`Self@C`, pyright's form) rather than the method binding it.
+    self_by_class: bool,
 }
 
 impl<'db> DisplaySettings<'db> {
@@ -165,6 +168,14 @@ impl<'db> DisplaySettings<'db> {
     pub(crate) fn preserve_long_unions(self) -> Self {
         Self {
             preserve_full_unions: true,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn self_named_by_class(self) -> Self {
+        Self {
+            self_by_class: true,
             ..self
         }
     }
@@ -702,6 +713,13 @@ impl<'db> DisplayType<'_, 'db> {
     pub(crate) fn preserve_long_unions(self) -> Self {
         Self {
             settings: self.settings.preserve_long_unions(),
+            ..self
+        }
+    }
+
+    pub(crate) fn self_named_by_class(self) -> Self {
+        Self {
+            settings: self.settings.self_named_by_class(),
             ..self
         }
     }
@@ -1603,7 +1621,7 @@ impl<'db> BoundTypeVarIdentity<'db> {
         std::fmt::from_fn(move |f| {
             f.write_str(self.identity.name(db))?;
             let binding_context = self.binding_context;
-            if let Some(binding_context_name) = binding_context.name(db)
+            if let Some(binding_context_name) = self.binding_context_name(db, &settings)
                 && let Some(definition) = binding_context.definition()
                 && !settings.active_scopes.contains(&definition)
             {
@@ -1614,6 +1632,21 @@ impl<'db> BoundTypeVarIdentity<'db> {
             }
             Ok(())
         })
+    }
+}
+
+impl<'db> BoundTypeVarIdentity<'db> {
+    /// The name after `@`: the binding context's — or, under `self_by_class`, the class
+    /// a `Self` stands for, read off the class scope its binding method sits in.
+    fn binding_context_name(self, db: &'db dyn Db, settings: &DisplaySettings<'db>) -> Option<String> {
+        if settings.self_by_class && self.identity.kind(db) == TypeVarKind::TypingSelf {
+            let scope = self.binding_context.definition()?.scope(db);
+            if let Some(class) = scope.node(db).as_class() {
+                let module = parsed_module(db, scope.python_file(db)).load(db);
+                return Some(class.node(&module).name.as_str().to_string());
+            }
+        }
+        self.binding_context.name(db)
     }
 }
 

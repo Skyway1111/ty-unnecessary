@@ -371,6 +371,38 @@ fn call_edges_type_helper_returned_receivers_and_mark_external_callees() {
     );
 }
 
+/// A `Self` type variable is named after its class in batch answers (pyright's
+/// `Self@K`), where ty's own reveal names the binding method (`Self@who`).
+#[test]
+fn self_typevars_are_named_after_their_class() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(
+        root.join("m.py"),
+        "\
+class K:
+    def who(self):
+        return self.clone()
+
+    def clone(self):
+        return self
+",
+    )
+    .unwrap();
+    let request = serde_json::json!({
+        "queries": [
+            {"id": "who", "file": "m.py", "expr": "K.who"},
+            // `self` on line 3 (1-based), byte cols 15..19
+            {"id": "self", "file": "m.py", "line": 3, "col_start": 15, "col_end": 19},
+        ],
+    });
+    let (stdout, ok) = run_batch(root, &request);
+    assert!(ok, "batch run failed: {stdout}");
+    let response: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(response["answers"]["who"], "(self) -> Self@K", "{response}");
+    assert_eq!(response["answers"]["self"], "Self@K", "{response}");
+}
+
 /// `--serve` answers every request on one warm db exactly like a fresh
 /// `--batch` process would: expr appends and world overlays are undone
 /// between requests (sightline v5.2: the four passes share one process).

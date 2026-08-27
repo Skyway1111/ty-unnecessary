@@ -52,7 +52,9 @@ use crate::types::{
 };
 
 /// Shim-facing (batch protocol): the string `report_revealed_type` would print for
-/// `ty` — the inferred-return patch plus ty's display, long unions preserved.
+/// `ty` — the inferred-return patch plus ty's display, long unions preserved, and a
+/// `Self` type variable named after its class (`Self@C`, pyright's form; ty's own
+/// reveals name the binding method).
 pub fn revealed_display<'db>(
     db: &'db dyn Db,
     ty: Type<'db>,
@@ -61,6 +63,7 @@ pub fn revealed_display<'db>(
     with_inferred_return(db, ty)
         .display(db, env)
         .preserve_long_unions()
+        .self_named_by_class()
         .to_string()
 }
 
