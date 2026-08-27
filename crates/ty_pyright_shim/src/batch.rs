@@ -52,7 +52,7 @@
 //! report the diagnostics added relative to the base check, by
 //! `(file, line, rule)` identity (sightline's counterfactual baseline key).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write as _;
 use std::io::{BufRead as _, Write as _};
 
@@ -165,7 +165,7 @@ fn handle(
                 .push((q.id.clone(), expr.clone()));
         }
     }
-    let mut reveal_ids: HashMap<(File, usize), String> = HashMap::new();
+    let mut reveal_ids: BTreeMap<(File, usize), String> = BTreeMap::new();
     for (rel, entries) in &appends_by_file {
         let file = resolve(db, root, rel)?;
         restore_appends.push((file, file.source_text_override(db).clone()));
