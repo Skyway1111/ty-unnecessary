@@ -32,7 +32,8 @@
 //! which override a call reaches at runtime is sightline's judgement. Targets
 //! lie inside the analyzed root; a callee whose every definition lies outside it
 //! (and, for a bound method, whose receiver class does too) is reported with
-//! `"targets": [], "external": true` — no body under the root runs. A union
+//! `"targets": [], "external": [<dotted home>, ...]` (`sqlite3.Connection.execute`;
+//! sorted) — no body under the root runs. A union
 //! straddling the root is no entry. A receiver ty leaves `Unknown` because a
 //! return-unannotated function produced it (`make().m()`, `c = make(); c.m()`)
 //! is typed by that function's inferred return (`types/callee.rs`).
@@ -374,7 +375,7 @@ fn call_edges(db: &ProjectDatabase, root: &SystemPath) -> Vec<serde_json::Value>
                         .map(|(file, line)| serde_json::json!({"file": file, "line": line}))
                         .collect();
                 }
-                EdgeVerdict::External => entry["external"] = serde_json::Value::Bool(true),
+                EdgeVerdict::External(homes) => entry["external"] = homes.into(),
             }
             edges.push(((path.to_string(), line, col, end_line, end_col), entry));
         }
@@ -388,8 +389,8 @@ enum EdgeVerdict {
     Targets(Vec<(String, usize)>),
     /// No body under the root runs: every definition is outside it, and so is every
     /// bound method's receiver class (a root class inheriting a library method may
-    /// be called back through the library's template hooks).
-    External,
+    /// be called back through the library's template hooks). The definitions' homes.
+    External(Vec<String>),
 }
 
 /// A union that straddles the root is no verdict.
@@ -405,7 +406,7 @@ fn edge_verdict(
             .is_some_and(|path| path.starts_with(root))
     };
     let mut targets: Vec<(String, usize)> = Vec::new();
-    let mut outside = 0usize;
+    let mut outside: Vec<String> = Vec::new();
     for definition in definitions {
         let target = definition.definition.file();
         if in_root(target) {
@@ -421,15 +422,19 @@ fn edge_verdict(
         if !receiver_outside {
             return None;
         }
-        outside += 1;
+        outside.push(definition.home.clone());
     }
-    match (targets.is_empty(), outside) {
-        (false, 0) => {
+    match (targets.is_empty(), outside.is_empty()) {
+        (false, true) => {
             targets.sort();
             targets.dedup();
             Some(EdgeVerdict::Targets(targets))
         }
-        (true, n) if n > 0 => Some(EdgeVerdict::External),
+        (true, false) => {
+            outside.sort();
+            outside.dedup();
+            Some(EdgeVerdict::External(outside))
+        }
         _ => None,
     }
 }

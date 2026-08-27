@@ -314,7 +314,7 @@ fn call_edges_type_helper_returned_receivers_and_mark_external_callees() {
     let (stdout, ok) = run_batch(root, &serde_json::json!({"call_edges": true}));
     assert!(ok, "batch run failed: {stdout}");
     let response: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    let edges: Vec<(u64, u64, u64, Vec<(String, u64)>, bool)> = response["call_edges"]
+    let edges: Vec<(u64, u64, u64, Vec<(String, u64)>, Vec<String>)> = response["call_edges"]
         .as_array()
         .unwrap()
         .iter()
@@ -336,27 +336,36 @@ fn call_edges_type_helper_returned_receivers_and_mark_external_callees() {
                         )
                     })
                     .collect(),
-                e["external"].as_bool().unwrap_or(false),
+                e["external"]
+                    .as_array()
+                    .map(|homes| {
+                        homes
+                            .iter()
+                            .map(|h| h.as_str().unwrap().to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             )
         })
         .collect();
     let model = |line: u64| vec![("model.py".to_string(), line)];
     let app = |line: u64| vec![("app.py".to_string(), line)];
+    let external = |home: &str| vec![home.to_string()];
     assert_eq!(
         edges,
         vec![
-            (7, 11, 14, model(3), false),  // C() -> class C
-            (11, 8, 14, app(6), false),    // make() -> def make
-            (12, 4, 9, model(4), false),   // c.m() -> C.m: c is make()'s inferred return
-            (13, 4, 10, app(6), false),    // make() inside make().m()
-            (13, 4, 14, model(4), false),  // make().m() -> C.m, not D.m
-            (17, 8, 20, vec![], true),     // open(): a builtin
-            (18, 4, 14, vec![], true),     // f.write(s): a file object's method
-            (19, 4, 11, vec![], true),     // Path(p): a library class
-            (19, 4, 25, vec![], true),     // Path(p).write_text(s)
-            (20, 4, 14, vec![], true),     // "".join(s): str's method
-            (21, 4, 10, vec![], true),     // len(s)
-            (22, 4, 9, model(7), false),   // Enc() -> class Enc; Enc().encode(s) is no edge
+            (7, 11, 14, model(3), vec![]), // C() -> class C
+            (11, 8, 14, app(6), vec![]),   // make() -> def make
+            (12, 4, 9, model(4), vec![]),  // c.m() -> C.m: c is make()'s inferred return
+            (13, 4, 10, app(6), vec![]),   // make() inside make().m()
+            (13, 4, 14, model(4), vec![]), // make().m() -> C.m, not D.m
+            (17, 8, 20, vec![], external("builtins.open")),
+            (18, 4, 14, vec![], external("_io._TextIOBase.write")), // a file object's
+            (19, 4, 11, vec![], external("pathlib.Path")),
+            (19, 4, 25, vec![], external("pathlib.Path.write_text")),
+            (20, 4, 14, vec![], external("builtins.str.join")),
+            (21, 4, 10, vec![], external("builtins.len")),
+            (22, 4, 9, model(7), vec![]), // Enc() -> class Enc; Enc().encode(s) is no edge
         ],
         "{response}"
     );

@@ -12,8 +12,11 @@ use ruff_db::parsed::{ParsedModuleRef, parsed_module};
 use ruff_python_ast as ast;
 use ty_python_core::definition::DefinitionKind;
 
+use ty_python_core::definition::Definition;
+
 use crate::Db;
 use crate::semantic_model::{HasType, SemanticModel};
+use crate::types::display::qualified_name_components_from_scope;
 use crate::types::ide_support::{ImportAliasResolution, ResolvedDefinition, definitions_for_name};
 use crate::types::inferred_return::with_inferred_return;
 use crate::types::{ProgramEnvironment, Type};
@@ -23,6 +26,10 @@ use crate::types::{ProgramEnvironment, Type};
 pub struct CalleeDefinition {
     /// `(file, name range)` of the definition.
     pub definition: FileRange,
+    /// The definition's dotted home: module, enclosing classes, name
+    /// (`sqlite3.Connection.execute`) — what an external callee is, to a consumer
+    /// keeping a catalog of library effects.
+    pub home: String,
     /// A bound method's receiver class.
     pub receiver: ReceiverClass,
 }
@@ -171,9 +178,23 @@ fn collect<'db>(
     let module = parsed_module(db, db.program_file(file).python_file(db)).load(db);
     out.push(CalleeDefinition {
         definition: definition.focus_range(db, &module),
+        home: home(db, definition),
         receiver,
     });
     true
+}
+
+/// `module.Enclosing.name` of a definition (a nested def's function scopes render as
+/// `<locals of function 'f'>`, as ty's qualified displays do).
+fn home(db: &dyn Db, definition: Definition<'_>) -> String {
+    let mut parts = qualified_name_components_from_scope(
+        db,
+        definition.program_file(db),
+        definition.file_scope(db),
+        0,
+    );
+    parts.extend(definition.name(db));
+    parts.join(".")
 }
 
 /// The file defining the class of a bound method's `self`: an instance's class, a class
