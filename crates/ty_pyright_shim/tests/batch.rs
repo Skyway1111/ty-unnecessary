@@ -254,6 +254,114 @@ fn call_edges_report_definitions() {
     assert_eq!(response["call_edges"].as_array().unwrap().len(), 0);
 }
 
+/// Three files: the receiver classes, an unrelated class sharing the method
+/// name (CHA by name cannot pick), and the callers. A receiver a
+/// return-unannotated helper returned (`c = make(); c.m()`, `make().m()`) is
+/// typed by the helper's inferred return; a callee whose definition and
+/// receiver class both lie outside the root (`open`, a file object's `write`,
+/// `Path(...)`, `str.join`, `len`) is external; a root class inheriting a
+/// library method (`Enc(JSONEncoder).encode`) is neither.
+const MODEL_PY: &str = "\
+from json import JSONEncoder
+
+class C:
+    def m(self):
+        return 1
+
+class Enc(JSONEncoder):
+    def default(self, o):
+        return str(o)
+";
+
+const OTHER_PY: &str = "\
+class D:
+    def m(self):
+        print(\"x\")
+";
+
+const APP_PY: &str = "\
+from pathlib import Path
+
+from model import C, Enc
+
+
+def make():
+    return C()
+
+
+def use():
+    c = make()
+    c.m()
+    make().m()
+
+
+def save(p, s):
+    f = open(p, \"w\")
+    f.write(s)
+    Path(p).write_text(s)
+    \"\".join(s)
+    len(s)
+    Enc().encode(s)
+";
+
+#[test]
+fn call_edges_type_helper_returned_receivers_and_mark_external_callees() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("model.py"), MODEL_PY).unwrap();
+    std::fs::write(root.join("other.py"), OTHER_PY).unwrap();
+    std::fs::write(root.join("app.py"), APP_PY).unwrap();
+    let (stdout, ok) = run_batch(root, &serde_json::json!({"call_edges": true}));
+    assert!(ok, "batch run failed: {stdout}");
+    let response: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let edges: Vec<(u64, u64, u64, Vec<(String, u64)>, bool)> = response["call_edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["file"].as_str().unwrap().ends_with("app.py"))
+        .map(|e| {
+            (
+                e["line"].as_u64().unwrap(),
+                e["col"].as_u64().unwrap(),
+                e["end_col"].as_u64().unwrap(),
+                e["targets"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|t| {
+                        let file = std::path::Path::new(t["file"].as_str().unwrap());
+                        (
+                            file.file_name().unwrap().to_str().unwrap().to_string(),
+                            t["line"].as_u64().unwrap(),
+                        )
+                    })
+                    .collect(),
+                e["external"].as_bool().unwrap_or(false),
+            )
+        })
+        .collect();
+    let model = |line: u64| vec![("model.py".to_string(), line)];
+    let app = |line: u64| vec![("app.py".to_string(), line)];
+    assert_eq!(
+        edges,
+        vec![
+            (7, 11, 14, model(3), false),  // C() -> class C
+            (11, 8, 14, app(6), false),    // make() -> def make
+            (12, 4, 9, model(4), false),   // c.m() -> C.m: c is make()'s inferred return
+            (13, 4, 10, app(6), false),    // make() inside make().m()
+            (13, 4, 14, model(4), false),  // make().m() -> C.m, not D.m
+            (17, 8, 20, vec![], true),     // open(): a builtin
+            (18, 4, 14, vec![], true),     // f.write(s): a file object's method
+            (19, 4, 11, vec![], true),     // Path(p): a library class
+            (19, 4, 25, vec![], true),     // Path(p).write_text(s)
+            (20, 4, 14, vec![], true),     // "".join(s): str's method
+            (21, 4, 10, vec![], true),     // len(s)
+            (22, 4, 9, model(7), false),   // Enc() -> class Enc; Enc().encode(s) is no edge
+        ],
+        "{response}"
+    );
+}
+
 /// `--serve` answers every request on one warm db exactly like a fresh
 /// `--batch` process would: expr appends and world overlays are undone
 /// between requests (sightline v5.2: the four passes share one process).

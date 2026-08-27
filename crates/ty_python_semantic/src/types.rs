@@ -25,7 +25,7 @@ use ty_module_resolver::{
 };
 
 pub(crate) use self::callable::UpcastPolicy;
-pub use self::callee::callee_definitions;
+pub use self::callee::{CalleeDefinition, ReceiverClass, callee_definitions};
 use self::class::ClassInstanceFlags;
 pub use self::cyclic::CycleDetector;
 pub(crate) use self::cyclic::TypeTransformer;

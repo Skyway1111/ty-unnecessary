@@ -24,12 +24,18 @@
 //! counterfactual veto depends on it).
 //!
 //! `call_edges` (when requested): one entry per call expression in a project
-//! `.py` file whose callee type denotes definitions inside the analyzed root —
+//! `.py` file whose callee type denotes definitions —
 //! `{"file", "line", "col", "end_line", "end_col", "targets": [{"file",
 //! "line"}]}`, 1-based lines, byte columns (Python's `ast` convention), target
 //! lines at the definition's name; sorted. Definitions only (functions, bound
 //! methods' functions, classes for constructor calls; unions all-or-nothing) —
-//! which override a call reaches at runtime is sightline's judgement.
+//! which override a call reaches at runtime is sightline's judgement. Targets
+//! lie inside the analyzed root; a callee whose every definition lies outside it
+//! (and, for a bound method, whose receiver class does too) is reported with
+//! `"targets": [], "external": true` — no body under the root runs. A union
+//! straddling the root is no entry. A receiver ty leaves `Unknown` because a
+//! return-unannotated function produced it (`make().m()`, `c = make(); c.m()`)
+//! is typed by that function's inferred return (`types/callee.rs`).
 //!
 //! `--serve`: the same protocol, one request per stdin line and one response
 //! line each, on one warm db — a request's source overrides are undone before
@@ -64,7 +70,7 @@ use salsa::Setter as _;
 use serde::Deserialize;
 use ty_project::{Db as _, ProjectDatabase};
 use ty_python_semantic::Db as _;
-use ty_python_semantic::types::{callee_definitions, revealed_display};
+use ty_python_semantic::types::{CalleeDefinition, ReceiverClass, callee_definitions, revealed_display};
 use ty_python_semantic::{HasType, SemanticModel};
 
 use crate::convert;
@@ -321,8 +327,9 @@ fn span_type(
     Some(crate::normalize_type_display(&display))
 }
 
-/// Every call expression in a project `.py` file with ≥1 definition target
-/// inside `root` (module doc), sorted by position.
+/// Every call expression in a project `.py` file whose callee denotes definitions:
+/// targets inside `root`, or `external` when every definition (and every bound
+/// method's receiver class) lies outside it (module doc), sorted by position.
 fn call_edges(db: &ProjectDatabase, root: &SystemPath) -> Vec<serde_json::Value> {
     // (file, line, col, end_line, end_col): the sort key and sightline's site identity
     type Span = (String, usize, usize, usize, usize);
@@ -344,49 +351,87 @@ fn call_edges(db: &ProjectDatabase, root: &SystemPath) -> Vec<serde_json::Value>
             calls.visit_stmt(stmt);
         }
         for call in calls.calls {
-            let Some(callee) = ast::ExprRef::from(&*call.func).inferred_type(&model) else {
+            let Some(definitions) = callee_definitions(db, &model, call) else {
                 continue;
             };
-            let Some(definitions) = callee_definitions(db, callee) else {
+            let Some(verdict) = edge_verdict(db, root, &definitions) else {
                 continue;
             };
-            let mut targets: Vec<(String, usize)> = Vec::new();
-            for definition in definitions {
-                let target = definition.file();
-                let Some(target_path) = target.path(db).as_system_path() else {
-                    targets.clear();
-                    break;
-                };
-                if !target_path.starts_with(root) {
-                    targets.clear(); // a union reaching outside the root: no edge
-                    break;
-                }
-                let line = line_index(db, target).line_index(definition.range().start());
-                targets.push((target_path.to_string(), line.get()));
-            }
-            if targets.is_empty() {
-                continue;
-            }
-            targets.sort();
-            targets.dedup();
             let (line, col) = byte_position(&index, &source, call.range().start());
             let (end_line, end_col) = byte_position(&index, &source, call.range().end());
-            let entry = serde_json::json!({
+            let mut entry = serde_json::json!({
                 "file": path.to_string(),
                 "line": line,
                 "col": col,
                 "end_line": end_line,
                 "end_col": end_col,
-                "targets": targets
-                    .iter()
-                    .map(|(file, line)| serde_json::json!({"file": file, "line": line}))
-                    .collect::<Vec<_>>(),
+                "targets": [],
             });
+            match verdict {
+                EdgeVerdict::Targets(targets) => {
+                    entry["targets"] = targets
+                        .iter()
+                        .map(|(file, line)| serde_json::json!({"file": file, "line": line}))
+                        .collect();
+                }
+                EdgeVerdict::External => entry["external"] = serde_json::Value::Bool(true),
+            }
             edges.push(((path.to_string(), line, col, end_line, end_col), entry));
         }
     }
     edges.sort_by(|a, b| a.0.cmp(&b.0));
     edges.into_iter().map(|(_, entry)| entry).collect()
+}
+
+enum EdgeVerdict {
+    /// `(file, definition line)` of every target, inside the root.
+    Targets(Vec<(String, usize)>),
+    /// No body under the root runs: every definition is outside it, and so is every
+    /// bound method's receiver class (a root class inheriting a library method may
+    /// be called back through the library's template hooks).
+    External,
+}
+
+/// A union that straddles the root is no verdict.
+fn edge_verdict(
+    db: &ProjectDatabase,
+    root: &SystemPath,
+    definitions: &[CalleeDefinition],
+) -> Option<EdgeVerdict> {
+    // a vendored typeshed stub has no system path: outside the root
+    let in_root = |file: File| -> bool {
+        file.path(db)
+            .as_system_path()
+            .is_some_and(|path| path.starts_with(root))
+    };
+    let mut targets: Vec<(String, usize)> = Vec::new();
+    let mut outside = 0usize;
+    for definition in definitions {
+        let target = definition.definition.file();
+        if in_root(target) {
+            let line = line_index(db, target).line_index(definition.definition.range().start());
+            targets.push((target.path(db).as_system_path()?.to_string(), line.get()));
+            continue;
+        }
+        let receiver_outside = match definition.receiver {
+            ReceiverClass::Unbound => true,
+            ReceiverClass::Defined(class_file) => !in_root(class_file),
+            ReceiverClass::Opaque => false,
+        };
+        if !receiver_outside {
+            return None;
+        }
+        outside += 1;
+    }
+    match (targets.is_empty(), outside) {
+        (false, 0) => {
+            targets.sort();
+            targets.dedup();
+            Some(EdgeVerdict::Targets(targets))
+        }
+        (true, n) if n > 0 => Some(EdgeVerdict::External),
+        _ => None,
+    }
 }
 
 /// `(1-based line, byte column within the line)` of an offset.
