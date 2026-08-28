@@ -464,3 +464,74 @@ fn serve_answers_each_request_like_a_fresh_batch() {
     drop(stdin);
     assert!(child.wait().unwrap().success(), "EOF must end the server cleanly");
 }
+
+/// A name bound only in some arms (the judged `UnboundLocalError` shape) is
+/// ty's `possibly-unresolved-reference`, off by default and raised by the shim.
+/// `bound`'s if/else covers every path, so it is the silent twin.
+const UNBOUND_PY: &str = r#"
+def pick(spec: str) -> str:
+    if spec == "a":
+        field = "a"
+    elif spec == "b":
+        field = "b"
+    return field
+
+def bound(spec: str) -> str:
+    if spec == "a":
+        name = "a"
+    else:
+        name = "b"
+    return name
+"#;
+
+/// The same file with `bound`'s `else` arm dropped: the only thing this world
+/// adds is a second possibly-unbound read.
+const UNBOUND_OVERLAY: &str = r#"
+def pick(spec: str) -> str:
+    if spec == "a":
+        field = "a"
+    elif spec == "b":
+        field = "b"
+    return field
+
+def bound(spec: str) -> str:
+    if spec == "a":
+        name = "a"
+    return name
+"#;
+
+#[test]
+fn possibly_unbound_reads_report_as_warnings_and_never_veto() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("m.py"), UNBOUND_PY).unwrap();
+
+    let request = serde_json::json!({
+        "queries": [],
+        "worlds": [
+            {"id": "unbound", "overlays": [{"file": "m.py", "content": UNBOUND_OVERLAY}]},
+        ],
+    });
+    let (stdout, ok) = run_batch(root, &request);
+    assert!(ok, "batch run failed: {stdout}");
+    let response: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let diags = response["diagnostics"].as_array().unwrap();
+    let unbound: Vec<_> = diags
+        .iter()
+        .filter(|d| d["rule"] == "reportPossiblyUnbound")
+        .collect();
+    assert_eq!(unbound.len(), 1, "{diags:?}");
+    assert_eq!(unbound[0]["range"]["start"]["line"], 6); // zero-based `return field`
+    assert_eq!(unbound[0]["severity"], "warning");
+
+    // the veto contract (sightline #5/#10 watch new *error*-severity diagnostics):
+    // a world whose only new diagnostic is a possibly-unbound read must not veto
+    let added = response["worlds"][0]["added_diagnostics"].as_array().unwrap();
+    assert_eq!(added.len(), 1, "{added:?}");
+    assert_eq!(added[0]["rule"], "reportPossiblyUnbound");
+    assert!(
+        !added.iter().any(|d| d["severity"] == "error"),
+        "a possibly-unbound read must never arm the counterfactual veto: {added:?}"
+    );
+}

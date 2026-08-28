@@ -118,6 +118,21 @@ fn read_pyright_config(path: Option<&str>) -> Result<PyrightConfig> {
     Ok(config)
 }
 
+/// The lints the shim turns on (ty ships the ported ones and
+/// `possibly-unresolved-reference` at `Level::Ignore`) and pyright's rule name for each.
+/// Every mapped rule reaches the JSON at *warning* severity (`convert`), which is what
+/// makes `possibly-unresolved-reference` reportable at all: sightline's counterfactual
+/// veto (#5/#10) fires on new *error*-severity diagnostics, so a possibly-unbound read a
+/// splice reveals must never reach it as one.
+const ENABLED_RULES: &[(&str, &str)] = &[
+    ("unnecessary-isinstance", "reportUnnecessaryIsInstance"),
+    ("unnecessary-comparison", "reportUnnecessaryComparison"),
+    ("unnecessary-contains", "reportUnnecessaryContains"),
+    ("redundant-cast", "reportUnnecessaryCast"),
+    ("unresolved-import", "reportMissingImports"),
+    ("possibly-unresolved-reference", "reportPossiblyUnbound"),
+];
+
 /// pyright rule name for a ty diagnostic; `None` drops the diagnostic.
 fn pyright_rule(id: DiagnosticId) -> Option<&'static str> {
     if id == DiagnosticId::RevealedType {
@@ -126,14 +141,10 @@ fn pyright_rule(id: DiagnosticId) -> Option<&'static str> {
     let DiagnosticId::Lint(name) = id else {
         return None;
     };
-    match name.as_str() {
-        "unnecessary-isinstance" => Some("reportUnnecessaryIsInstance"),
-        "unnecessary-comparison" => Some("reportUnnecessaryComparison"),
-        "unnecessary-contains" => Some("reportUnnecessaryContains"),
-        "redundant-cast" => Some("reportUnnecessaryCast"),
-        "unresolved-import" => Some("reportMissingImports"),
-        _ => None,
-    }
+    ENABLED_RULES
+        .iter()
+        .find(|(ty_rule, _)| *ty_rule == name.as_str())
+        .map(|(_, pyright)| *pyright)
 }
 
 fn main() -> Result<()> {
@@ -169,21 +180,15 @@ fn main() -> Result<()> {
     let mut metadata = ProjectMetadata::discover(&root, &system)?;
     metadata.apply_configuration_files(&system)?;
 
-    let rules = [
-        "unnecessary-isinstance",
-        "unnecessary-comparison",
-        "unnecessary-contains",
-        "redundant-cast",
-        "unresolved-import",
-    ]
-    .into_iter()
-    .map(|rule| {
-        (
-            RangedValue::cli(rule.to_string()),
-            RangedValue::cli(Level::Warn),
-        )
-    })
-    .collect();
+    let rules = ENABLED_RULES
+        .iter()
+        .map(|(ty_rule, _)| {
+            (
+                RangedValue::cli((*ty_rule).to_string()),
+                RangedValue::cli(Level::Warn),
+            )
+        })
+        .collect();
 
     let options = Options {
         environment: Some(EnvironmentOptions {

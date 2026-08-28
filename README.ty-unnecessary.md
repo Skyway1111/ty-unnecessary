@@ -24,7 +24,12 @@ basedpyright's Node sidecar.
 | Inferred-return reveals | `crates/ty_python_semantic/src/types/inferred_return.rs` | pyright's revealed signature of an unannotated function: the body's return union (+ reachable fall-through `None`), `Generator[Y, S, R]` for generators, through direct `return f(...)` chains the callee's inferred return where ty leaves `Unknown` (bounded, cycle-guarded), through identity-typed decorators (`Callable[[F], F]`) and `Callable[P, R]` decorators (the bound signature keeps the function's definition), for bound methods (`C.m` on a classmethod) the bound signature, and for a property on its class (`C.attr`) the getter. mdtest `unnecessary/inferred_return.md`. |
 | Differential harness | `scripts/diff_pyright.py`, ledger + receipts in `parity/` | Runs sightline's `provers/oracle.py` against both checkers on the corpus; every divergence must be classified `ty-better` / `ty-worse` in `parity/ty-divergences.toml` or the run fails. |
 
-The rules are **off by default** (`Level::Ignore`); the shim enables them. The `==`/`!=`
+The rules are **off by default** (`Level::Ignore`); the shim enables them, together with
+ty's own `possibly-unresolved-reference` (also `Ignore` upstream), which it names
+`reportPossiblyUnbound` after pyright's rule for the same shape. Every enabled rule is
+listed once in `ENABLED_RULES` and reported at *warning* severity, so sightline's
+counterfactual veto — which fires on new *error*-severity diagnostics — is never armed by
+a possibly-unbound read a splice reveals. The `==`/`!=`
 no-overlap arm deliberately replicates pyright's `__eq__`-ignoring unsoundness — bit-identity
 with pyright is the v1 acceptance gate; sightline's grounding layer stays responsible for
 demoting equality diagnostics.
