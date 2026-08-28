@@ -17,11 +17,15 @@
 //! }
 //! ```
 //!
-//! Response: `{"version", "diagnostics": [...], "answers": {id: type},
-//! "worlds": [{"id", "added_diagnostics": [...]}], "call_edges": [...]}` —
-//! diagnostic entries in the same shape as the pyright-CLI mode's
+//! Response: `{"version", "diagnostics": [...], "answers": {id: type | null |
+//! {"error"}}, "worlds": [{"id", "added_diagnostics": [...]}], "call_edges":
+//! [...]}` — diagnostic entries in the same shape as the pyright-CLI mode's
 //! `generalDiagnostics` (error-severity passthrough included: sightline's
-//! counterfactual veto depends on it).
+//! counterfactual veto depends on it). Every query id is answered: `null` is
+//! an honest miss (no expression at exactly that span, a line past the file),
+//! a file the project cannot resolve is a per-id `{"error"}`, so an absent id
+//! is a torn answer, never a miss — sightline fails on an error or an absence
+//! rather than let a finding vanish.
 //!
 //! `call_edges` (when requested): one entry per call expression in a project
 //! `.py` file whose callee type denotes definitions —
@@ -166,8 +170,16 @@ fn handle(
         }
     }
     let mut reveal_ids: BTreeMap<(File, usize), String> = BTreeMap::new();
+    let mut answers: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     for (rel, entries) in &appends_by_file {
-        let file = resolve(db, root, rel)?;
+        let file = match resolve(db, root, rel) {
+            Ok(file) => file,
+            Err(e) => {
+                let error = serde_json::json!({"error": e.to_string()});
+                answers.extend(entries.iter().map(|(id, _)| (id.clone(), error.clone())));
+                continue;
+            }
+        };
         restore_appends.push((file, file.source_text_override(db).clone()));
         let base = source_text(db, file);
         let mut content = base.as_str().to_string();
@@ -185,7 +197,6 @@ fn handle(
     }
 
     // -- base check: diagnostics
-    let mut answers: BTreeMap<String, String> = BTreeMap::new();
     let mut diagnostics = Vec::new();
     let mut base_keys: HashSet<(String, u64, String)> = HashSet::new();
     for diagnostic in &db.check() {
@@ -202,9 +213,8 @@ fn handle(
 
     // -- expr queries: the appended argument, typed natively
     for ((file, line), id) in &reveal_ids {
-        if let Some(type_text) = appended_expr_type(db, *file, *line) {
-            answers.insert(id.clone(), type_text);
-        }
+        let answer = appended_expr_type(db, *file, *line);
+        answers.insert(id.clone(), answer.map_or(serde_json::Value::Null, serde_json::Value::String));
     }
 
     // -- span queries: native resolution against the same base state
@@ -218,10 +228,12 @@ fn handle(
                 q.id
             ));
         };
-        let file = resolve(db, root, &q.file)?;
-        if let Some(type_text) = span_type(db, file, line, col_start, col_end) {
-            answers.insert(q.id.clone(), type_text);
-        }
+        let answer = match resolve(db, root, &q.file) {
+            Ok(file) => span_type(db, file, line, col_start, col_end)
+                .map_or(serde_json::Value::Null, serde_json::Value::String),
+            Err(e) => serde_json::json!({"error": e.to_string()}),
+        };
+        answers.insert(q.id.clone(), answer);
     }
 
     // -- callee edges: every call's definition targets, from the same base state
@@ -304,7 +316,9 @@ fn appended_expr_type(db: &ProjectDatabase, file: File, line: usize) -> Option<S
 /// Native `(file, span) -> type`: the expression whose range is exactly the
 /// requested span, through the same inferred-return patch and display
 /// normalization as the reveal transport. `None` is an honest miss (no node at
-/// exactly that range, or no inferred type) — never a nearest-node guess.
+/// exactly that range, a line past the file, or no inferred type) — never a
+/// nearest-node guess, never a panic (a caller whose byte columns disagree
+/// with this file, e.g. one that decoded non-UTF-8 bytes lossily, asks past it).
 fn span_type(
     db: &ProjectDatabase,
     file: File,
@@ -316,6 +330,9 @@ fn span_type(
     let parsed = parsed_module(db, program_file.python_file(db)).load(db);
     let source = source_text(db, file);
     let index = line_index(db, file);
+    if line > index.line_count() {
+        return None; // `line_start` indexes the line-start table: past it, a panic
+    }
     let line_start = index.line_start(ruff_source_file::OneIndexed::new(line)?, &source);
     let start = line_start + TextSize::try_from(col_start).ok()?;
     let end = line_start + TextSize::try_from(col_end).ok()?;

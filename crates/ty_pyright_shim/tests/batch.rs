@@ -61,6 +61,10 @@ fn batch_contract() {
             {"id": "span0", "file": "m.py", "line": 5, "col_start": 18, "col_end": 23},
             // off-node span: an honest miss, never a nearest-node guess
             {"id": "miss0", "file": "m.py", "line": 5, "col_start": 11, "col_end": 20},
+            // a line past the file: a miss, never a panic; a file the project
+            // cannot resolve: a per-id error, never a dead request
+            {"id": "far0", "file": "m.py", "line": 999, "col_start": 0, "col_end": 1},
+            {"id": "nofile0", "file": "absent.py", "line": 1, "col_start": 0, "col_end": 1},
             {"id": "expr0", "file": "m.py", "expr": "helper"},
         ],
         "worlds": [
@@ -79,7 +83,12 @@ fn batch_contract() {
     let answers = response["answers"].as_object().unwrap();
     assert_eq!(answers["span0"], "Literal[\"abc\"]");
     assert_eq!(answers["expr0"], "(q: str) -> int");
-    assert!(!answers.contains_key("miss0"));
+    // every id answered: a miss is an explicit null, so an absent id is a torn answer
+    for miss in ["miss0", "far0"] {
+        assert!(answers.contains_key(miss) && answers[miss].is_null(), "{miss}: {answers:?}");
+    }
+    let error = answers["nofile0"]["error"].as_str().unwrap();
+    assert!(error.contains("absent.py"), "{error}");
 
     let worlds = response["worlds"].as_array().unwrap();
     assert_eq!(worlds[0]["id"], "breaking");
@@ -159,8 +168,11 @@ fn malformed_request_fails_loudly() {
     );
 }
 
+/// An expr query naming a file the project cannot resolve answers a per-id
+/// error: the request (and a `--serve` db) outlives it, and the caller sees
+/// which id was torn instead of "type unknown".
 #[test]
-fn unresolvable_query_file_fails_loudly() {
+fn unresolvable_query_file_answers_a_per_id_error() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     std::fs::write(root.join("m.py"), MAIN_PY).unwrap();
@@ -175,8 +187,10 @@ fn unresolvable_query_file_fails_loudly() {
         .arg(root)
         .output()
         .unwrap();
-    assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let error = response["answers"]["q"]["error"].as_str().unwrap();
+    assert!(error.contains("missing.py"), "{error}");
 }
 
 /// Two classes share a method name (CHA cannot pick); the receiver's type
