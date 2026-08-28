@@ -137,6 +137,11 @@ fn pyright_rule(id: DiagnosticId) -> Option<&'static str> {
 }
 
 fn main() -> Result<()> {
+    // Before any root parsing: an installer asks a downloaded binary which commit it is.
+    if std::env::args().skip(1).any(|arg| arg == "--version") {
+        println!("ty-unnecessary {}", env!("SHIM_COMMIT"));
+        return Ok(());
+    }
     let args = parse_args()?;
     let mut config = read_pyright_config(args.project_config.as_deref())?;
     // The CLI flag wins over the config key, matching basedpyright 1.39.10 (which

@@ -1,0 +1,43 @@
+# Prebuilt `ty-unnecessary` shims for sightline's installer: tag `shim-v<n>` ->
+# one release asset per platform, named for the platform the installer asks for.
+name: shim-release
+
+on:
+  push:
+    tags: ["shim-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes "ty_pyright_shim at ${{ github.sha }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  build:
+    needs: release
+    strategy:
+      matrix:
+        include:
+          - { os: windows-latest, asset: ty-unnecessary-windows-x64.exe, exe: ty-unnecessary.exe }
+          - { os: ubuntu-latest, asset: ty-unnecessary-linux-x64, exe: ty-unnecessary }
+          - { os: macos-14, asset: ty-unnecessary-macos-arm64, exe: ty-unnecessary }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      # rust-toolchain.toml pins the toolchain; the runners' rustup honours it.
+      - run: cargo build --release --locked -p ty_pyright_shim
+        env:
+          # The installer verifies the download by `--version` against its pin.
+          TY_UNNECESSARY_COMMIT: ${{ github.sha }}
+        shell: bash
+      - run: |
+          cp "target/release/${{ matrix.exe }}" "${{ matrix.asset }}"
+          gh release upload "$GITHUB_REF_NAME" "${{ matrix.asset }}" --repo "$GITHUB_REPOSITORY" --clobber
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
