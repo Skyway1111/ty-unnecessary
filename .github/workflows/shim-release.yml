@@ -14,7 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes "ty_pyright_shim at ${{ github.sha }}"
+      # idempotent: a re-run of the tag uploads into the release it already made
+      - run: gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes "ty_pyright_shim at ${{ github.sha }}"
         env:
           GH_TOKEN: ${{ github.token }}
 
