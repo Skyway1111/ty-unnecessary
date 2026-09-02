@@ -15,50 +15,50 @@ license = "MIT"
 [workspace.dependencies]
 char_str = { version = "0.0.2" }
 ruff = { version = "0.16.4", path = "crates/ruff" }
-ruff_annotate_snippets = { version = "0.0.10", path = "crates/ruff_annotate_snippets" }
-ruff_cache = { version = "0.0.10", path = "crates/ruff_cache" }
-ruff_db = { version = "0.0.10", path = "crates/ruff_db", default-features = false }
-ruff_diagnostics = { version = "0.0.10", path = "crates/ruff_diagnostics" }
+annotate_snippets = { package = "sightline-ruff-annotate-snippets", version = "0.1.0", path = "crates/ruff_annotate_snippets" }
+ruff_cache = { package = "sightline-ruff-cache", version = "0.1.0", path = "crates/ruff_cache" }
+ruff_db = { package = "sightline-ruff-db", version = "0.1.0", path = "crates/ruff_db", default-features = false }
+ruff_diagnostics = { package = "sightline-ruff-diagnostics", version = "0.1.0", path = "crates/ruff_diagnostics" }
 ruff_formatter = { version = "0.0.10", path = "crates/ruff_formatter" }
 ruff_graph = { version = "0.0.10", path = "crates/ruff_graph" }
-ruff_index = { version = "0.0.10", path = "crates/ruff_index" }
+ruff_index = { package = "sightline-ruff-index", version = "0.1.0", path = "crates/ruff_index" }
 ruff_linter = { version = "0.16.4", path = "crates/ruff_linter" }
-ruff_macros = { version = "0.0.10", path = "crates/ruff_macros" }
+ruff_macros = { package = "sightline-ruff-macros", version = "0.1.0", path = "crates/ruff_macros" }
 ruff_markdown = { version = "0.0.10", path = "crates/ruff_markdown" }
-ruff_memory_usage = { version = "0.0.10", path = "crates/ruff_memory_usage" }
-ruff_notebook = { version = "0.0.10", path = "crates/ruff_notebook" }
-ruff_options_metadata = { version = "0.0.10", path = "crates/ruff_options_metadata" }
-ruff_python_ast = { version = "0.0.10", path = "crates/ruff_python_ast" }
-ruff_python_codegen = { version = "0.0.10", path = "crates/ruff_python_codegen" }
+ruff_memory_usage = { package = "sightline-ruff-memory-usage", version = "0.1.0", path = "crates/ruff_memory_usage" }
+ruff_notebook = { package = "sightline-ruff-notebook", version = "0.1.0", path = "crates/ruff_notebook" }
+ruff_options_metadata = { package = "sightline-ruff-options-metadata", version = "0.1.0", path = "crates/ruff_options_metadata" }
+ruff_python_ast = { package = "sightline-ruff-python-ast", version = "0.1.0", path = "crates/ruff_python_ast" }
+ruff_python_codegen = { package = "sightline-ruff-python-codegen", version = "0.1.0", path = "crates/ruff_python_codegen" }
 ruff_python_formatter = { version = "0.0.10", path = "crates/ruff_python_formatter" }
 ruff_python_importer = { version = "0.0.10", path = "crates/ruff_python_importer" }
 ruff_python_index = { version = "0.0.10", path = "crates/ruff_python_index" }
-ruff_python_literal = { version = "0.0.10", path = "crates/ruff_python_literal" }
-ruff_python_parser = { version = "0.0.10", path = "crates/ruff_python_parser" }
+ruff_python_literal = { package = "sightline-ruff-python-literal", version = "0.1.0", path = "crates/ruff_python_literal" }
+ruff_python_parser = { package = "sightline-ruff-python-parser", version = "0.1.0", path = "crates/ruff_python_parser" }
 ruff_python_semantic = { version = "0.0.10", path = "crates/ruff_python_semantic" }
-ruff_python_stdlib = { version = "0.0.10", path = "crates/ruff_python_stdlib" }
-ruff_python_trivia = { version = "0.0.10", path = "crates/ruff_python_trivia" }
+ruff_python_stdlib = { package = "sightline-ruff-python-stdlib", version = "0.1.0", path = "crates/ruff_python_stdlib" }
+ruff_python_trivia = { package = "sightline-ruff-python-trivia", version = "0.1.0", path = "crates/ruff_python_trivia" }
 ruff_server = { version = "0.0.10", path = "crates/ruff_server" }
-ruff_source_file = { version = "0.0.10", path = "crates/ruff_source_file" }
+ruff_source_file = { package = "sightline-ruff-source-file", version = "0.1.0", path = "crates/ruff_source_file" }
 ruff_mdtest = { path = "crates/ruff_mdtest" }
-ruff_ranged_value = { version = "0.0.10", path = "crates/ruff_ranged_value" }
-ruff_text_size = { version = "0.0.10", path = "crates/ruff_text_size" }
+ruff_ranged_value = { package = "sightline-ruff-ranged-value", version = "0.1.0", path = "crates/ruff_ranged_value" }
+ruff_text_size = { package = "sightline-ruff-text-size", version = "0.1.0", path = "crates/ruff_text_size" }
 ruff_workspace = { version = "0.0.10", path = "crates/ruff_workspace" }
 
 ty = { path = "crates/ty" }
-ty_combine = { version = "0.0.10", path = "crates/ty_combine" }
+ty_combine = { package = "sightline-ty-combine", version = "0.1.0", path = "crates/ty_combine" }
 ty_completion_bench = { path = "crates/ty_completion_bench" }
 ty_completion_eval = { path = "crates/ty_completion_eval" }
 ty_ide = { path = "crates/ty_ide" }
-ty_module_resolver = { version = "0.0.10", path = "crates/ty_module_resolver" }
-ty_project = { path = "crates/ty_project", default-features = false }
-ty_python_semantic = { version = "0.0.10", path = "crates/ty_python_semantic" }
-ty_python_core = { version = "0.0.10", path = "crates/ty_python_core" }
+ty_module_resolver = { package = "sightline-ty-module-resolver", version = "0.1.0", path = "crates/ty_module_resolver" }
+ty_project = { package = "sightline-ty-project", version = "0.1.0", path = "crates/ty_project", default-features = false }
+ty_python_semantic = { package = "sightline-ty-python-semantic", version = "0.1.0", path = "crates/ty_python_semantic" }
+ty_python_core = { package = "sightline-ty-python-core", version = "0.1.0", path = "crates/ty_python_core" }
 ty_server = { path = "crates/ty_server" }
-ty_site_packages = { version = "0.0.10", path = "crates/ty_site_packages" }
-ty_static = { version = "0.0.10", path = "crates/ty_static" }
+ty_site_packages = { package = "sightline-ty-site-packages", version = "0.1.0", path = "crates/ty_site_packages" }
+ty_static = { package = "sightline-ty-static", version = "0.1.0", path = "crates/ty_static" }
 ty_test = { path = "crates/ty_test" }
-ty_vendored = { version = "0.0.10", path = "crates/ty_vendored" }
+ty_vendored = { package = "sightline-ty-vendored", version = "0.1.0", path = "crates/ty_vendored" }
 
 mdtest = { path = "crates/mdtest" }
 

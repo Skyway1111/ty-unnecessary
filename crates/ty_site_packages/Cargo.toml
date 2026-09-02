@@ -1,20 +1,21 @@
 [package]
-name = "ty_site_packages"
-version = "0.0.10"
-description = "This is an internal component crate of Ruff"
+name = "sightline-ty-site-packages"
+version = "0.1.0"
+description = "sightline's fork of ty_site_packages, an internal crate of ruff and ty (astral-sh/ruff), as the sightline binary pins it"
 authors = { workspace = true }
 edition = { workspace = true }
 rust-version = { workspace = true }
-homepage = { workspace = true }
-documentation = { workspace = true }
-repository = { workspace = true }
+homepage = "https://github.com/Skyway1111/ty-unnecessary"
+repository = "https://github.com/Skyway1111/ty-unnecessary"
 license = { workspace = true }
+exclude = ["tests/**", "resources/**", "benches/**", "fuzz/**", "**/snapshots/**"]
 
 [lib]
+name = "ty_site_packages"
 doctest = false
 
 [dependencies]
-ruff_annotate_snippets = { workspace = true }
+annotate_snippets = { workspace = true }
 ruff_db = { workspace = true }
 ruff_python_ast = { workspace = true }
 ruff_python_trivia = { workspace = true }

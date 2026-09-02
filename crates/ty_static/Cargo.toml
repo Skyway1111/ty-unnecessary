@@ -1,16 +1,17 @@
 [package]
-name = "ty_static"
-version = "0.0.10"
-description = "This is an internal component crate of Ruff"
+name = "sightline-ty-static"
+version = "0.1.0"
+description = "sightline's fork of ty_static, an internal crate of ruff and ty (astral-sh/ruff), as the sightline binary pins it"
 edition = { workspace = true }
 rust-version = { workspace = true }
-homepage = { workspace = true }
-documentation = { workspace = true }
-repository = { workspace = true }
+homepage = "https://github.com/Skyway1111/ty-unnecessary"
+repository = "https://github.com/Skyway1111/ty-unnecessary"
 authors = { workspace = true }
 license = { workspace = true }
+exclude = ["tests/**", "resources/**", "benches/**", "fuzz/**", "**/snapshots/**"]
 
 [lib]
+name = "ty_static"
 doctest = false
 test = false
 

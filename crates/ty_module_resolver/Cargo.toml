@@ -1,14 +1,17 @@
 [package]
-name = "ty_module_resolver"
-version = "0.0.10"
-description = "This is an internal component crate of Ruff"
+name = "sightline-ty-module-resolver"
+version = "0.1.0"
+description = "sightline's fork of ty_module_resolver, an internal crate of ruff and ty (astral-sh/ruff), as the sightline binary pins it"
 authors = { workspace = true }
 edition = { workspace = true }
 rust-version = { workspace = true }
-homepage = { workspace = true }
-documentation = { workspace = true }
-repository = { workspace = true }
+homepage = "https://github.com/Skyway1111/ty-unnecessary"
+repository = "https://github.com/Skyway1111/ty-unnecessary"
 license = { workspace = true }
+exclude = ["tests/**", "resources/**", "benches/**", "fuzz/**", "**/snapshots/**"]
+
+[lib]
+name = "ty_module_resolver"
 
 [dependencies]
 ruff_db = { workspace = true }
@@ -33,7 +36,7 @@ tracing = { workspace = true }
 [dev-dependencies]
 ruff_db = { workspace = true, features = ["testing", "os"] }
 # Keep this path-only so Cargo strips the unpublished ty dev-dependency when packaging.
-ty_vendored = { path = "../ty_vendored" }
+ty_vendored = { package = "sightline-ty-vendored", version = "0.1.0", path = "../ty_vendored" }
 
 insta = { workspace = true, features = ["filters"] }
 tempfile = { workspace = true }

@@ -1,16 +1,17 @@
 [package]
-name = "ruff_python_codegen"
-version = "0.0.10"
-description = "This is an internal component crate of Ruff"
+name = "sightline-ruff-python-codegen"
+version = "0.1.0"
+description = "sightline's fork of ruff_python_codegen, an internal crate of ruff and ty (astral-sh/ruff), as the sightline binary pins it"
 authors = { workspace = true }
 edition = { workspace = true }
 rust-version = { workspace = true }
-homepage = { workspace = true }
-documentation = { workspace = true }
-repository = { workspace = true }
+homepage = "https://github.com/Skyway1111/ty-unnecessary"
+repository = "https://github.com/Skyway1111/ty-unnecessary"
 license = { workspace = true }
+exclude = ["tests/**", "resources/**", "benches/**", "fuzz/**", "**/snapshots/**"]
 
 [lib]
+name = "ruff_python_codegen"
 doctest = false
 
 [dependencies]

@@ -1,14 +1,14 @@
 [package]
-name = "ty_vendored"
-version = "0.0.10"
-description = "This is an internal component crate of Ruff"
+name = "sightline-ty-vendored"
+version = "0.1.0"
+description = "sightline's fork of ty_vendored, an internal crate of ruff and ty (astral-sh/ruff), as the sightline binary pins it"
 authors = { workspace = true }
 edition = { workspace = true }
 rust-version = { workspace = true }
-homepage = { workspace = true }
-documentation = { workspace = true }
-repository = { workspace = true }
+homepage = "https://github.com/Skyway1111/ty-unnecessary"
+repository = "https://github.com/Skyway1111/ty-unnecessary"
 license = { workspace = true }
+exclude = ["tests/**", "resources/**", "benches/**", "fuzz/**", "**/snapshots/**"]
 
 [dependencies]
 ruff_db = { workspace = true }
@@ -31,4 +31,5 @@ deflate = ["zip/deflate-flate2-zlib-rs"]
 workspace = true
 
 [lib]
+name = "ty_vendored"
 doctest = false
